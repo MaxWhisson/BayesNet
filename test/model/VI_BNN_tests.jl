@@ -1,0 +1,138 @@
+using Distributions
+using LogExpFunctions
+
+include("../../src/model/VI_BNN.jl")
+include("../../src/Training.jl")
+include("../test_helper_functions/sample_models.jl")
+
+##########################################################################
+####                              Tests                               ####
+##########################################################################
+
+function test_set_col_matrix_expr_1(i)
+    function f()
+        m = zeros(3,5)
+        col = [1;1;1]
+        m_out = set_col_matrix_expr(m, i, col)
+        for j in 1:5
+            if ((i == j) && !(m_out[:,j] == col)) return false end
+            if ((i != j) && !(m_out[:,j] == [0;0;0])) return false end
+        end
+        return true
+    end
+end
+
+function test_propagate_matrix_opp_basic()
+    m1 = zeros(2,3)
+    m2 = ones(2,3)
+    m_out = propagate_matrix_opp(m1, m2, 1, (x -> x.+2))
+    return m_out[:,2] == [3;3]
+end
+
+function test_propagate_matrix_opp_chain()
+    m1 = zeros(2,3)
+    m_out_1 = propagate_matrix_opp(m1, m1, 1, (x -> x.+2))
+    m_out_2 = propagate_matrix_opp(m_out_1, m_out_1, 2, (x -> x.+2))
+    return m_out_2[:,3] == [4;4]
+end
+
+function test_uniform_coef_1()
+    return uniform_complexity_cost(1,1) ≈ 1
+end
+
+function test_uniform_coef_2()
+    return uniform_complexity_cost(5,2) ≈ 0.2
+end
+
+function test_exponential_complexity_cost_1()
+    return exponential_complexity_cost(1,1) ≈ 1
+end
+
+function test_exponential_complexity_cost_2()
+    return exponential_complexity_cost(5,2) ≈ (8/31)
+end
+
+function test_gaussian_entropy_1()
+    return gaussian_entropy(float.(log.([1,1])), 2) ≈ 1 + log(2π)
+end
+
+function test_gaussian_entropy_2()
+    return gaussian_entropy(float.(log.([ℯ,ℯ])), 4) ≈ 2 * (1 + log(2π) + 2)
+end
+
+function test_log_diagonal_gaussian_posterior_size_correct(D)
+    m = make_test_VI_model(D, true, 1)
+    variational_params = m.θ[1:m.n_variational_params]
+    samples = m.weight_sampler(variational_params, 20, m.structure.n_total_params)
+    return size(samples) == (m.structure.n_total_params, 20)
+end
+
+function test_log_full_gaussian_posterior_size_correct(D)
+    m = make_test_VI_model(D, false, 1)
+    variational_params = m.θ[1:m.n_variational_params]
+    samples = m.weight_sampler(variational_params, 20, m.structure.n_total_params)
+    return size(samples) == (m.structure.n_total_params, 20)
+end
+
+function test_flow_transforms_1(n_inputs)
+    m = make_test_VI_model(n_inputs, true, 1)
+    D = m.structure.n_total_params # number of weights
+    flow = [PlanarFlowLayer(D, logistic), RadialFlowLayer(D), RadialFlowLayer(D)]
+    (wₖ, jacobian_det_sum) = flow_transforms(m, randn(sum((x->x.n_params).(flow))), ones(D))
+    (size(wₖ)[1] == D) && (size(jacobian_det_sum)[1] == D)
+end
+
+function test_variational_free_energy()
+    f = variational_free_energy_creator(false, exponential_complexity_cost)
+    m = make_test_VI_model(2, true, 1)
+    X, y = generate_binary_clusters(float.([2,1]), float.([1,2]))
+
+    L = f(m, X, y, TrainingParameters(), 1, 1)
+    typeof(L) == Float64
+end
+
+##########################################################################
+####                            Test sets                             ####
+##########################################################################
+
+@testset verbose = true "VI functions" begin
+    @testset "Helper Functions" begin
+        @testset "set_col_matrix_expr()" begin
+            @test test_set_col_matrix_expr_1(1)()
+            @test test_set_col_matrix_expr_1(5)()
+        end
+
+        @testset "propagate_matrix_opp()" begin
+            @test test_propagate_matrix_opp_basic()
+            @test test_propagate_matrix_opp_chain()
+        end
+
+        @testset "complexity_cost_coefficients()" begin
+            @test test_uniform_coef_1()
+            @test test_uniform_coef_2()
+            @test test_exponential_complexity_cost_1()
+            @test test_exponential_complexity_cost_2()
+        end
+
+        @testset "Gaussian entropy" begin
+            @test test_gaussian_entropy_1()
+            @test test_gaussian_entropy_2()
+        end
+    end
+
+    @testset "normalising flows" begin
+        @test test_flow_transforms_1(2)
+        @test test_flow_transforms_1(7)
+    end
+
+    @testset "probability distributions" begin
+        @test test_log_diagonal_gaussian_posterior_size_correct(2)
+        @test test_log_diagonal_gaussian_posterior_size_correct(10)
+        @test test_log_full_gaussian_posterior_size_correct(4)
+        @test test_log_full_gaussian_posterior_size_correct(7)
+    end
+
+    @testset "loss functions" begin
+        @test test_variational_free_energy()
+    end
+end
