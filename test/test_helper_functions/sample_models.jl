@@ -1,8 +1,8 @@
 using Distributions
 using LogExpFunctions
+using LinearAlgebra
 
-include("../../src/model/VI_BNN.jl")
-include("../../src/model/Models.jl")
+using BayesNet
 
 leaky_relu = x -> max(x,0.1)
 
@@ -27,20 +27,28 @@ function generate_multi_clusters(centres...)
     return X, y .|> Int
 end
 
-function make_test_VI_model(D::Int, is_diagonal::Bool, n_out::Int; log_l = binary_log_likelihood)
-    f = is_diagonal ? VariationalDiagonalGaussianModel : VariationalFullGaussianModel
+function make_test_VI_model(D::Int, is_diagonal::Bool, n_out::Int; log_l = BayesNet.binary_log_likelihood)
+    f = is_diagonal ? 
+        BayesNet.VariationalDiagonalGaussianModel : 
+        BayesNet.VariationalFullGaussianModel
     return f(
         log_l, 
         D,
-        [Layer(10, leaky_relu), Layer(5, leaky_relu), Layer(n_out, logistic)]
+        [
+            BayesNet.Layer(10, leaky_relu), 
+            BayesNet.Layer(5, leaky_relu), 
+            BayesNet.Layer(n_out, logistic)
+        ]
     )
 end
 
 function make_test_VI_regression_model(D::Int, is_diagonal::Bool, n_out::Int)
-    f = is_diagonal ? VariationalDiagonalGaussianModel : VariationalFullGaussianModel
+    f = is_diagonal ? 
+        BayesNet.VariationalDiagonalGaussianModel : 
+        BayesNet.VariationalFullGaussianModel
     return f(
-        regression_log_likelihood, 
+        BayesNet.regression_log_likelihood, 
         D,
-        [Layer(5, leaky_relu), Layer(n_out, x -> x)]
+        [BayesNet.Layer(5, leaky_relu), BayesNet.Layer(n_out, x -> x)]
     )
 end

@@ -5,7 +5,23 @@ using Test
         include("model/VI_BNN_tests.jl")
     end
 
-    @testset "Model tests" begin
+    @testset "Laplace tests" begin
+
+    end
+
+    @testset "MCMC tests" begin
+
+    end
+
+    @testset "sampler tests" begin
+        include("model/Samplers_tests.jl")
+    end
+
+    @testset "training tests" begin
+
+    end
+
+    @testset "model tests" begin
         include("model/Models_tests.jl")
     end
 end

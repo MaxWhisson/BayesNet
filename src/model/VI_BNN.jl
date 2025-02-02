@@ -1,22 +1,38 @@
+module VI_BNN
+
+# function exports
+export  VariationalFullGaussianModel,
+        VariationalDiagonalGaussianModel,
+        log_diagonal_gaussian_posterior,
+        log_full_gaussian_posterior,
+        gaussian_entropy,
+        propagate_matrix_opp,
+        set_col_matrix_expr,
+        flow_transforms,
+        uniform_complexity_cost,
+        exponential_complexity_cost,
+        variational_free_energy_creator
+
 # dependencies:
 using LinearAlgebra
 using Distributions
 using Optimisers
 using Random
 
-include("Samplers.jl")
-include("Models.jl")
-include("../Training.jl")
+using ..Samplers
+using ..Models
+using ..Training
+using ..HelperFunctions
 
 # constructor for Gaussian Variational models
 function VariationalGaussianModel(prior_creator::Function, log_likelihood::Function, 
-        n_inputs::Int, is_diagonal::Bool, layers::Vector{Layer}; normalising_flow = [])
+        n_inputs::Int, is_diagonal::Bool, layers::Vector{Models.Layer}; normalising_flow = [])
 
     n_weights = n_inputs * layers[1].n +
         sum([layers[i].n * layers[i + 1].n for i in 1:length(layers) - 1])
     n_params = n_weights + length(layers)
 
-    n_variational_params = is_diagonal ? n_params * 2 : n_params + (n_params ^ 2)
+    n_variational_params = is_diagonal ? n_params * 2 : n_params + HelperFunctions.triangular(n_params)
     n_flow_params = normalising_flow != [] ? sum((x -> x.n_params).(normalising_flow)) : 0
 
     sampler = is_diagonal ? diagonal_gaussian_sampler : full_gaussian_sampler
@@ -38,7 +54,7 @@ end
 
 # simpler constructor for model architectures with full Gaussian weights.
 function VariationalFullGaussianModel(log_likelihood::Function, n_inputs::Int, 
-    layers::Vector{Layer}; normalising_flow = [])
+    layers::Vector{Models.Layer}; normalising_flow = [])
 VariationalGaussianModel(
     diagonal_gaussian_prior_creator,
     log_likelihood, 
@@ -51,7 +67,7 @@ end
 
 # simpler constructor for model architectures with diagonal Gaussian weights.
 function VariationalDiagonalGaussianModel(log_likelihood::Function, n_inputs::Int, 
-    layers::Vector{Layer}; normalising_flow = [])
+    layers::Vector{Models.Layer}; normalising_flow = [])
 VariationalGaussianModel(
     diagonal_gaussian_prior_creator,
     log_likelihood, 
@@ -93,17 +109,7 @@ function gaussian_entropy(log_σ::Vector{Float64}, dims::Int)
 	return 0.5 * dims * (1 + log(2π) + sum(log_σ))
 end
 
-function propagate_matrix_opp(matrix1, matrix2, i, f)                                                                                                                                                                                                                                                 
-    matrix1[:,i + 1] = f(matrix2[:, i])                                                                                                                                                                                                                     
-    return matrix1
-end
-
-function set_col_matrix_expr(matrix, i, col)
-    matrix[:,i] = col
-    return matrix
-end
-
-function flow_transforms(m::VariationalModel, flow_params::Vector{Float64}, w::Vector{Float64})
+function flow_transforms(m::Models.VariationalModel, flow_params::Vector{Float64}, w::Vector{Float64})
     transforms = foldl(
         ((i, param_index, transformation_matrix, jacobian_determinants), layer) -> (
             i + 1, 
@@ -176,4 +182,6 @@ function variational_free_energy_creator(is_closed_form_gaussian::Bool, coef_fun
         return coef * (variational_expectation - flows_E) - 
             mean(log_density(m, samples, X, y, coef = coef))
     end
+end
+
 end

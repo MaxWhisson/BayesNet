@@ -1,11 +1,19 @@
+module LaplaceBNN
+
+# function exports
+export  LaplaceModel,
+        MAP_loss_fn,
+        fit_covariance!,
+        fit_gaussian!
+
 # dependencies:
 using LinearAlgebra
 using Distributions
 using Optimisers
 using Random
 
-include("Models.jl")
-include("../Training.jl")
+using ..Models
+using ..Training
 
 # constructor for Laplace models
 function LaplaceModel(prior::ParameterisedFunction, log_likelihood::Function, 
@@ -38,6 +46,8 @@ end
 function fit_gaussian!(m, X, y, train_params::TrainingParameters)
     args = TrainArgs(train_params, MAP_loss_fn)
     # learn first portion of m.θ (MAP)
-    train!(m, X, y, args)
+    Training.train!(m, X, y, args)
     fit_covariance!(m, X, y, args)
+end
+
 end

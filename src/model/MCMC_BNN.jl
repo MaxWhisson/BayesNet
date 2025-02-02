@@ -1,12 +1,19 @@
+module MCMC_BNN
+
+# function exports
+export  MCMC_Parameterised_Model,
+        adaptive_MCMC_sampler,
+        Langevin_dynamics_MCMC_sampler
+
 using LinearAlgebra
 using Random
 using Distributions
 using Zygote
 
-include("Models.jl")
+using ..Models
 
 # constructor for MCMC models
-function MCMC_Model(prior::ParameterisedFunction, log_likelihood::Function, n_inputs::Int, 
+function MCMC_Parameterised_Model(prior::Models.ParameterisedFunction, log_likelihood::Function, n_inputs::Int, 
         layers::Vector{Layer})
 
     n_weights = n_inputs * layers[1].n +
@@ -38,8 +45,7 @@ function adaptive_MCMC_sampler(m, X, y, n_samples; α′ = 0.25, pᵦ = 0.02)
         # equivalent to log(P(w'|D)/P(w|D))
         α = log_density(m, w_sample′, X, y) - log_density(m, w_sample, X, y)
         (w_sample, accepted) = rand(Uniform()) <= exp(α) ? 
-            (w_sample′, true) : 
-            (w_sample, false)
+            (w_sample′, true) : (w_sample, false)
         weights[:,i] = w_sample
 
         ∇L = gradient(Params([L])) do
@@ -65,7 +71,7 @@ function Langevin_dynamics_MCMC_sampler(m, X, y, args; a = 0.1,
     t = 1
 
     for epoch in 1:args.train_params.max_epoch
-        indexes = shuffle(1:end)
+        indexes = shuffle(1:length(y))
         X, y = X[indexes,:], y[indexes]
         for batch_i in 0:no_batches - 1
             start_index = 1 + batch_i * batch_size
@@ -90,4 +96,6 @@ function Langevin_dynamics_MCMC_sampler(m, X, y, args; a = 0.1,
         end
     end
     return weights
+end
+
 end

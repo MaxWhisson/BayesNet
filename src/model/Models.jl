@@ -1,11 +1,30 @@
+module Models
+
+# type exports
+export  Model, 
+        Layer, 
+        ModelStructure, 
+        ParameterisedFunction,
+        NormalisingFlowLayer,
+        VariationalModel,
+        LaplaceModel,
+        MCMC_Model
+
+# function exports
+export  diagonal_gaussian_prior_creator,
+        PlanarFlowLayer,
+        RadialFlowLayer,
+        softmax,
+        binary_log_likelihood,
+        multi_class_log_likelihood,
+        regression_log_likelihood,
+        log_density,
+        pred
+
 using Statistics
 using LinearAlgebra
 using Zygote
-
-function trace(x, y)
-    println(x)
-    y
-end
+using Distributions
 
 # struct for specifying a dense neural network layer.
 struct Layer
@@ -59,9 +78,7 @@ mutable struct LaplaceModel <: Model
     log_likelihood::Function            # likelihood of data for weights
 end
 
-abstract type AbstractMCMC_Model <: Model end
-
-mutable struct MCMC_Model <: AbstractMCMC_Model
+mutable struct MCMC_Model <: Model
     structure::ModelStructure
     log_prior::ParameterisedFunction    # log prior on weights
     log_likelihood::Function            # likelihood of data for weights
@@ -184,4 +201,6 @@ end
 # from 0
 function prune_weights_CI(m; CI_probability = 0.9)
     # TODO
+end
+
 end

@@ -1,4 +1,15 @@
-include("model/Models.jl")
+module Training
+
+# type exports
+export  TrainingParameters,
+        TrainArgs
+
+# function exports
+export  train!
+
+using Optimisers
+
+import ..Models
 
 @enum PRIOR_OPTIMISATION NONE=1 PARALLEL=2 BLOCK=3
 
@@ -34,7 +45,7 @@ function update_parameters!(m, X_batch, y_batch, args::TrainArgs, i, M)
 end
 
 # train model 'm' on data 'X' and 'y'
-function train!(m::Model, X::Matrix{Float64}, y::Vector, args::TrainArgs)
+function train!(m::Models.Model, X::Matrix{Float64}, y::Vector, args::TrainArgs)
     # for replicating results
     args.training_params.random_seed != -1 && Random.seed!(args.training_params.random_seed)
 
@@ -58,4 +69,6 @@ function train!(m::Model, X::Matrix{Float64}, y::Vector, args::TrainArgs)
         end
         @info "Mean loss of epoch $(epoch): $(mean(losses))"
     end
+end
+
 end

@@ -1,5 +1,12 @@
+module Samplers
+
+# function exports
+export diagonal_gaussian_sampler, full_gaussian_sampler
+
 using Random
 using LinearAlgebra
+
+using ..HelperFunctions
 
 # sample diagonal Gaussian variational θ n_samples times.
 function diagonal_gaussian_sampler(θ, n_samples, n_params)
@@ -9,6 +16,9 @@ end
 
 # sample full Gaussian variational θ n_samples times.
 function full_gaussian_sampler(θ, n_samples, n_params)
-    μ, L = θ[1:n_params], reshape(exp.(θ[n_params + 1:end]), (n_params, n_params))
+    μ, L♭ = θ[1:n_params], exp.(θ[n_params + 1:end])
+    L = HelperFunctions.to_lower_triangular(L♭, n_params)
     return μ .+ (L * randn(n_params, n_samples))
+end
+
 end
