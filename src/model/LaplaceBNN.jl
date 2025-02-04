@@ -1,7 +1,7 @@
 module LaplaceBNN
 
 # function exports
-export  LaplaceModel,
+export  BuildLaplaceModel,
         MAP_loss_fn,
         fit_covariance!,
         fit_gaussian!
@@ -16,17 +16,17 @@ using ..Models
 using ..Training
 
 # constructor for Laplace models
-function LaplaceModel(prior::ParameterisedFunction, log_likelihood::Function, 
-    n_inputs::Int, is_diagonal::Bool, layers::Vector{Layer})
+function BuildLaplaceModel(priorCreator::Function, log_likelihood::Function, 
+    n_inputs::Int, layers::Vector{Layer})
 
     n_weights = n_inputs * layers[1].n +
         sum([layers[i].n * layers[i + 1].n for i in 1:length(layers) - 1])
-    n_params = n_weights + length(layers)
+    n_params = n_weights + sum(layers .|> (x -> x.n))
 
-    return LaplaceModel(
-        ModelStructure(layers, n_inputs, n_weights_and_biases),
-        randn(n_params),
-        prior,
+    return Models.LaplaceModel(
+        Models.ModelStructure(layers, n_inputs, n_params),
+        randn(n_params),        # weights
+        priorCreator(n_params),
         log_likelihood
     )
 end

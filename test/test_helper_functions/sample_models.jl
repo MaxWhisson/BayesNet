@@ -27,6 +27,15 @@ function generate_multi_clusters(centres...)
     return X, y .|> Int
 end
 
+function make_binary_Laplace_model(n_in, layers)
+    BayesNet.BuildLaplaceModel(
+        BayesNet.diagonal_gaussian_prior_creator,
+        BayesNet.binary_log_likelihood,
+        n_in,
+        layers
+    )
+end
+
 function make_test_VI_model(D::Int, is_diagonal::Bool, n_out::Int; log_l = BayesNet.binary_log_likelihood)
     f = is_diagonal ? 
         BayesNet.VariationalDiagonalGaussianModel : 

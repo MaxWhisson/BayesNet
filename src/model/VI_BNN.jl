@@ -30,7 +30,7 @@ function VariationalGaussianModel(prior_creator::Function, log_likelihood::Funct
 
     n_weights = n_inputs * layers[1].n +
         sum([layers[i].n * layers[i + 1].n for i in 1:length(layers) - 1])
-    n_params = n_weights + length(layers)
+    n_params = n_weights + sum(layers .|> (x -> x.n))
 
     n_variational_params = is_diagonal ? n_params * 2 : n_params + HelperFunctions.triangular(n_params)
     n_flow_params = normalising_flow != [] ? sum((x -> x.n_params).(normalising_flow)) : 0
