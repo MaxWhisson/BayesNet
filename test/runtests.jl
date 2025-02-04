@@ -6,7 +6,7 @@ using Test
     end
 
     @testset "Laplace tests" begin
-
+        include("model/LaplaceBNN_tests.jl")
     end
 
     @testset "MCMC tests" begin
