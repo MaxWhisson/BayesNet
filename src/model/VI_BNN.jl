@@ -26,7 +26,9 @@ using ..HelperFunctions
 
 # constructor for Gaussian Variational models
 function VariationalGaussianModel(prior_creator::Function, log_likelihood::Function, 
-        n_inputs::Int, is_diagonal::Bool, layers::Vector{Models.Layer}; normalising_flow = [])
+        n_inputs::Int, is_diagonal::Bool, layers::Vector{Models.Layer}; 
+        normalising_flow = [],
+        variational_generator = (X, m) -> m.θ[1:m.n_variational_params])
 
     n_weights = n_inputs * layers[1].n +
         sum([layers[i].n * layers[i + 1].n for i in 1:length(layers) - 1])
@@ -45,6 +47,8 @@ function VariationalGaussianModel(prior_creator::Function, log_likelihood::Funct
         prior_creator(n_params),
         log_likelihood,
         posterior,
+
+        variational_generator,
 
         normalising_flow,
         n_variational_params,
@@ -85,7 +89,7 @@ function log_diagonal_gaussian_posterior(m, samples)
 
     log_posterior_pdf = sample -> logpdf(MvNormal(
         variational_params[1:n_params], 
-        Diagonal(exp.(variational_params[n_params + 1:end]) .^ 2)
+        Diagonal(log.(1 .+ exp.(variational_params[n_params + 1:end])) .^ 2)
     ), sample)
     return log_posterior_pdf.(eachcol(samples))
 end
@@ -94,7 +98,7 @@ end
 function log_full_gaussian_posterior(m, samples)
     variational_params = m.θ[1:m.n_variational_params]
     n_params = m.structure.n_total_params
-    L = reshape(exp.(variational_params[n_params + 1:end]), (n_params, n_params))
+    L = HelperFunctions.to_lower_triangular(log.(1 .+ exp.(variational_params[n_params + 1:end])))
 
     log_posterior_pdf = sample -> logpdf(MvNormal(
         variational_params[1:n_params], 
@@ -145,13 +149,22 @@ function exponential_complexity_cost(M, i)
     return (2 ^ (M - i)) / (2 ^ M - 1)
 end
 
+function encoder_creator(structure::Models.ModelStructure)
+    function f(X, m)
+        pred(structure, m.θ[1:m.n_variational_params], X)
+    end
+    return f
+end
+
 # VI training function to optimise
-function variational_free_energy_creator(is_closed_form_gaussian::Bool, coef_func::Function)
+# in the case of encoder architectures, m.variational_params is the encoder weights
+function variational_free_energy_creator(is_closed_form_gaussian::Bool, coef_func::Function; 
+        uses_encoder = false)
     function f(m, X, y, args, i, M)
         coef = coef_func(M, i)
 
         # samples from approximate posterior
-        variational_params = m.θ[1:m.n_variational_params]
+        variational_params = m.variational_param_generator(X, m)
         flow_params = m.θ[m.n_variational_params + 1:end]
 
         w₀ = m.weight_sampler(variational_params, args.n_samples, m.structure.n_total_params)
@@ -178,6 +191,8 @@ function variational_free_energy_creator(is_closed_form_gaussian::Bool, coef_fun
         else
             variational_expectation = mean(m.log_posterior(m, samples))
         end
+
+        mapped_log_likelihood = (m, X, y) -> (w -> m.log_likelihood(m, w, X, y))
 
         return coef * (variational_expectation - flows_E) - 
             mean(log_density(m, samples, X, y, coef = coef))

@@ -10,7 +10,7 @@ using Test
     end
 
     @testset "MCMC tests" begin
-
+        include("model/MCMC_tests.jl")
     end
 
     @testset "sampler tests" begin

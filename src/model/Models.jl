@@ -65,6 +65,8 @@ mutable struct VariationalModel <: Model
     log_likelihood::Function
     log_posterior::Function
 
+    variational_param_generator::Function
+
     normalising_flow::Vector{NormalisingFlowLayer}
     n_variational_params::Int
     n_flow_params::Int
@@ -91,8 +93,8 @@ end
 # function for creating diagonal gaussian parametrised priors
 function diagonal_gaussian_prior_creator(n_params) 
     return ParameterisedFunction(
-        randn(2 * n_params) .|> abs, 
-        θ -> w -> logpdf(MvNormal(θ[1:n_params], Diagonal(θ[n_params + 1:end])), w)
+        [zeros(n_params);ones(n_params)], 
+        θ -> w -> logpdf(MvNormal(θ[1:n_params], Diagonal(log.(1 .+ exp.(θ[n_params + 1:end])))), w)
     )
 end
 
@@ -129,14 +131,14 @@ end
 # log likelihood for binary classification
 function binary_log_likelihood(m::Model, w::AbstractArray{Float64}, X::Matrix{Float64}, 
         y::BitVector)
-    ŷ = pred(m, w, X)' # vector of Float64
+    ŷ = pred(m.structure, w, X)' # vector of Float64
     return sum(y .* log.(ŷ .+ eps()) + (1 .- y) .* log.(1 .- ŷ .+ eps()))
 end
 
 # log likelihood for multi-class classification
 function multi_class_log_likelihood(m::Model, w::AbstractArray{Float64}, X::Matrix{Float64}, 
         y::Vector{Int})
-    ŷ = pred(m, w, X) # matrix of Float64, column samples
+    ŷ = pred(m.structure, w, X) # matrix of Float64, column samples
     normalised_ŷ = mapslices(softmax, ŷ, dims=1)
     return sum(log.(normalised_ŷ[y] .+ eps()))
 end
@@ -147,7 +149,7 @@ function regression_log_likelihood(m::Model, w::AbstractArray{Float64}, X::Matri
     col_outer_product = x -> x * x'
     col_gaussian_exponent = Σ -> (x -> x' * Σ * x)
 
-    ŷ = pred(m, w, X) # matrix of Float64, column samples
+    ŷ = pred(m.structure, w, X) # matrix of Float64, column samples
     mean_diff = ŷ .- mean(ŷ, dims=2)
     sample_Σ = sum(col_outer_product.(eachcol(mean_diff))) / size(ŷ)[2]
     error_diff = ŷ .- y
@@ -163,26 +165,26 @@ function log_density(m, w, X, y; coef = 1)
 end
 
 # forward pass of model architecture for data X and weights.
-function pred(m::Model, weights::AbstractArray{Float64}, X::Matrix{Float64})
+function pred(s::ModelStructure, weights::AbstractArray{Float64}, X::Matrix{Float64})
     # initialise forward pass state
     output = X                      # previous layer output
     next_i_w = 1                    # next index to start from for weights
     next_i_b = 0                    # next index to start from back for biases
-    w_offset = m.structure.n_inputs # last layer dimension
+    w_offset = s.n_inputs # last layer dimension
 
     # iterate over the layers of the network
-    for i in 1:length(m.structure.layers)
+    for i in 1:length(s.layers)
         # get weights and biases of current layer
-        layer_weights = weights[next_i_w:next_i_w + w_offset * m.structure.layers[i].n - 1]
-        layer_weights = reshape(layer_weights, (m.structure.layers[i].n, w_offset))
+        layer_weights = weights[next_i_w:next_i_w + w_offset * s.layers[i].n - 1]
+        layer_weights = reshape(layer_weights, (s.layers[i].n, w_offset))
         
-        biases = weights[end - next_i_b - m.structure.layers[i].n + 1: end - next_i_b]
-        next_i_b = next_i_b + m.structure.layers[i].n
+        biases = weights[end - next_i_b - s.layers[i].n + 1: end - next_i_b]
+        next_i_b = next_i_b + s.layers[i].n
 
         # update forward pass state
-        output = m.structure.layers[i].activation.(layer_weights * output .+ biases)
-        next_i_w = next_i_w + w_offset * m.structure.layers[i].n
-        w_offset = m.structure.layers[i].n
+        output = s.layers[i].activation.(layer_weights * output .+ biases)
+        next_i_w = next_i_w + w_offset * s.layers[i].n
+        w_offset = s.layers[i].n
     end
     return output
 end

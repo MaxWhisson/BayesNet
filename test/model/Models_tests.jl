@@ -88,14 +88,14 @@ end
 function test_pred_1()
     m = make_test_VI_model(2, true, 3, log_l = BayesNet.multi_class_log_likelihood)
     X, y = generate_multi_clusters([1,2], [1,2], [3,3])
-    res = BayesNet.pred(m, randn(m.structure.n_total_params), X)
+    res = BayesNet.pred(m.structure, randn(m.structure.n_total_params), X)
     size(res)[2] == length(y)
 end
 
 function test_pred_2()
     m = make_test_VI_regression_model(1, true, 1)
     X, y = generate_regression_data()
-    res = BayesNet.pred(m, randn(m.structure.n_total_params), X)
+    res = BayesNet.pred(m.structure, randn(m.structure.n_total_params), X)
     size(res) == size(y)
 end
 
