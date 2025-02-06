@@ -12,7 +12,7 @@ export  Model,
 
 # function exports
 export  diagonal_gaussian_prior_creator,
-        PlanarFlowLayer,
+        PlanarFlowLayerCreator,
         RadialFlowLayer,
         softmax,
         binary_log_likelihood,
@@ -25,6 +25,7 @@ using Statistics
 using LinearAlgebra
 using Zygote
 using Distributions
+using ..HelperFunctions
 
 # struct for specifying a dense neural network layer.
 struct Layer
@@ -99,27 +100,43 @@ function diagonal_gaussian_prior_creator(n_params)
 end
 
 # h is smooth non-linearity
-function PlanarFlowLayer(D::Int, h::Function)
-    ψ = (w,b) -> (z -> gradient(h, w'z + b)[1] * w)
-    return NormalisingFlowLayer(
-        D,
-        2D + 1,
-        θ -> (z -> z + (θ[1:D] .* h(θ[D+1:2D]' * z + θ[2D+1]))),
-        θ -> (z -> abs(1 + θ[1:D]'ψ(θ[D+1:2D], θ[2D+1])(z)))
-    )
+function PlanarFlowLayerCreator(h::Function)
+    function PlanarFlowLayer(D::Int)
+        function ψ(w,b)
+            function f(z)
+                x = w'z + b
+                gradient(y -> h(y), x)[1] * w
+            end
+        end
+
+        return NormalisingFlowLayer(
+            D,
+            2D + 1,
+            θ -> (z -> z + (θ[1:D] .* h(θ[D+1:2D]' * z + θ[2D+1]))),
+            θ -> (z -> abs(1 + θ[1:D]'ψ(θ[D+1:2D], θ[2D+1])(z)))
+        )
+    end
 end
 
 function RadialFlowLayer(D::Int)
     h = (a, r) -> 1/(a + r)
+
+    function abs_det(θ)
+        function f(z)
+            r = norm(z - θ[3:D + 2])
+            t1 = ((1 + θ[1] * h(θ[2], r)) ^ (D - 1)) 
+            t2 = (1 + θ[1] * h(θ[2], r) + 
+                θ[1] * gradient(z -> h(θ[2], z), r)[1] * r
+            ) 
+            return t1 * t2
+        end
+    end
+
     return NormalisingFlowLayer(
         D,
         D + 2,
-        θ -> (z -> z + θ[1] * h(θ[2], norm(z - θ[1:D])) .* (z - θ[1:D])),
-        θ -> (z -> ((1 + θ[1] * h(θ[2], (r = norm(z - θ[1:D])))) ^ (D - 1)) * 
-            (1 + θ[1] * h(θ[2], r) + 
-                θ[1] * gradient(z -> h(θ[2], r), z) * r
-            ) 
-        )
+        θ -> (z -> z + θ[1] * h(θ[2], norm(z - θ[3:D + 2])) .* (z - θ[3:D + 2])),
+        abs_det
     )
 end
 
@@ -132,7 +149,7 @@ end
 function binary_log_likelihood(m::Model, w::AbstractArray{Float64}, X::Matrix{Float64}, 
         y::BitVector)
     ŷ = pred(m.structure, w, X)' # vector of Float64
-    return sum(y .* log.(ŷ .+ eps()) + (1 .- y) .* log.(1 .- ŷ .+ eps()))
+    return sum(y .* HelperFunctions.s_log.(ŷ) + (1 .- y) .* HelperFunctions.s_log.(1 .- ŷ))
 end
 
 # log likelihood for multi-class classification
@@ -140,7 +157,7 @@ function multi_class_log_likelihood(m::Model, w::AbstractArray{Float64}, X::Matr
         y::Vector{Int})
     ŷ = pred(m.structure, w, X) # matrix of Float64, column samples
     normalised_ŷ = mapslices(softmax, ŷ, dims=1)
-    return sum(log.(normalised_ŷ[y] .+ eps()))
+    return sum(HelperFunctions.s_log.(normalised_ŷ[y]))
 end
 
 # log likelihood for generalised multi-target regression

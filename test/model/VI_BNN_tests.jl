@@ -84,6 +84,17 @@ function test_flow_transforms_1(n_inputs)
     (size(wₖ)[1] == D) && (size(jacobian_det_sum)[1] == D)
 end
 
+function test_flow_transforms_2(n_inputs)
+    m = make_test_VI_model(n_inputs, true, 1)
+    D = m.structure.n_total_params # number of weights
+    flow = [
+        BayesNet.RadialFlowLayer(D)
+    ]
+    samples = randn(sum((x->x.n_params).(flow)))
+    (wₖ, jacobian_det_sum) = BayesNet.flow_transforms(m, samples, ones(D))
+    (size(wₖ)[1] == D) && (size(jacobian_det_sum)[1] == D)
+end
+
 function test_variational_free_energy()
     f = BayesNet.variational_free_energy_creator(false, BayesNet.exponential_complexity_cost)
     m = make_test_VI_model(2, true, 1)
@@ -125,6 +136,7 @@ end
     @testset "normalising flows" begin
         @test test_flow_transforms_1(2)
         @test test_flow_transforms_1(7)
+        @test test_flow_transforms_2(2)
     end
 
     @testset "probability distributions" begin

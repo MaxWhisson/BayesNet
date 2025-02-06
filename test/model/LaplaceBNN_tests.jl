@@ -6,7 +6,7 @@ function test_Laplace_model_constructor()
         [BayesNet.Layer(5, leaky_relu), BayesNet.Layer(1, logistic)]
     )
     condition1 = typeof(m) == BayesNet.LaplaceModel
-    condition2 = m.structure.n_params = 21
+    condition2 = m.structure.n_total_params == 21
     condition1 && condition2
 end
 

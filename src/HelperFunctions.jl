@@ -1,6 +1,7 @@
 module HelperFunctions
 
 export  propagate_matrix_opp,
+        propagate_vector_opp,
         set_col_matrix_expr,
         set_sub_array_expr,
         triangular,
@@ -10,6 +11,11 @@ export  propagate_matrix_opp,
 function propagate_matrix_opp(matrix1, matrix2, i, f)                                                                                                                                                                                                                                                 
     matrix1[:,i + 1] = f(matrix2[:, i])                                                                                                                                                                                                                     
     return matrix1
+end
+
+function propagate_vector_opp(vector1, matrix2, i, f)                                                                                                                                                                                                                                                 
+    vector1[i + 1] = f(matrix2[:,i])                                                                                                                                                                                                                     
+    return vector1
 end
 
 function set_col_matrix_expr(matrix, i, col)
@@ -24,6 +30,10 @@ end
 
 function triangular(n)
     sum(1:n)
+end
+
+function s_log(x)
+    log(x == 0 ? x + eps() : x)
 end
 
 function to_lower_triangular(arr, D)

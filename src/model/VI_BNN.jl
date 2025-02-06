@@ -35,7 +35,9 @@ function VariationalGaussianModel(prior_creator::Function, log_likelihood::Funct
     n_params = n_weights + sum(layers .|> (x -> x.n))
 
     n_variational_params = is_diagonal ? n_params * 2 : n_params + HelperFunctions.triangular(n_params)
-    n_flow_params = normalising_flow != [] ? sum((x -> x.n_params).(normalising_flow)) : 0
+
+    instantiated_flow = map(f -> f(n_params), normalising_flow) 
+    n_flow_params = instantiated_flow != [] ? sum((x -> x.n_params).(instantiated_flow)) : 0
 
     sampler = is_diagonal ? diagonal_gaussian_sampler : full_gaussian_sampler
     posterior = is_diagonal ? log_diagonal_gaussian_posterior : log_full_gaussian_posterior
@@ -50,7 +52,7 @@ function VariationalGaussianModel(prior_creator::Function, log_likelihood::Funct
 
         variational_generator,
 
-        normalising_flow,
+        instantiated_flow,
         n_variational_params,
         n_flow_params
     )
@@ -113,34 +115,6 @@ function gaussian_entropy(log_σ::Vector{Float64}, dims::Int)
 	return 0.5 * dims * (1 + log(2π) + sum(log_σ))
 end
 
-function flow_transforms(m::Models.VariationalModel, flow_params::Vector{Float64}, w::Vector{Float64})
-    transforms = foldl(
-        ((i, param_index, transformation_matrix, jacobian_determinants), layer) -> (
-            i + 1, 
-            param_index + layer.n_params + 1,
-            propagate_matrix_opp(
-                transformation_matrix,
-                transformation_matrix,
-                i, 
-                layer.func(
-                    flow_params[param_index:param_index + layer.n_params]
-                )
-            ),
-            propagate_matrix_opp(
-                jacobian_determinants,
-                transformation_matrix,
-                i, 
-                layer.jacobian_determinant(
-                    flow_params[param_index:param_index + layer.n_params]
-                )
-            )
-        ), 
-        m.normalising_flow; 
-        init = (1, 1, [w zeros(length(w), length(w))], zeros(length(w), length(w) + 1))
-    )
-    return transforms[3][:,end], sum(transforms[4], dims = 2)
-end
-
 function uniform_complexity_cost(M, i)
     return 1/M
 end
@@ -154,6 +128,36 @@ function encoder_creator(structure::Models.ModelStructure)
         pred(structure, m.θ[1:m.n_variational_params], X)
     end
     return f
+end
+
+function transform_sample(m::Models.VariationalModel, flow_params::Vector{Float64})
+    function f(w)
+        param_index = 1
+        for i in 1:length(m.normalising_flow)
+            w = m.normalising_flow[i].func(
+                flow_params[param_index:param_index + m.normalising_flow[i].n_params - 1]
+            )(w)
+            param_index += m.normalising_flow[i].n_params
+        end
+        return w
+    end
+end
+
+function sum_log_jacobian(m, flow_params)
+    function f(w)
+        log_jacobian_sum = 0
+        param_index = 1
+        for i in 1:length(m.normalising_flow)
+            w = m.normalising_flow[i].func(
+                flow_params[param_index:param_index + m.normalising_flow[i].n_params - 1]
+            )(w)
+            log_jacobian_sum += m.normalising_flow[i].jacobian_determinant(
+                flow_params[param_index:param_index + m.normalising_flow[i].n_params - 1]
+            )(w) .|> abs .|> log
+            param_index += m.normalising_flow[i].n_params
+        end
+        return log_jacobian_sum
+    end
 end
 
 # VI training function to optimise
@@ -170,14 +174,9 @@ function variational_free_energy_creator(is_closed_form_gaussian::Bool, coef_fun
         w₀ = m.weight_sampler(variational_params, args.n_samples, m.structure.n_total_params)
 
         if (m.normalising_flow != [])
-            transform_vals = ((m, params) -> w -> 
-                flow_transforms(m, params, w))(m, flow_params).(eachcol(w₀))
-                samples = foldl(
-                    ((i, matrix), col) -> (i + 1, set_col_matrix_expr(matrix, i, col)),
-                    (x->x[1]).(transform_vals), 
-                    (1, Matrix(undef, size(w₀)))
-                )
-            flows_E = mean(ln.((x->x[2])(transform_vals)))
+            samples = transform_sample(m, flow_params).(eachcol(w₀))
+            samples = reduce(hcat, samples)
+            flows_E = mean(sum_log_jacobian(m, flow_params).(eachcol(w₀)))
         else
             samples = w₀
             flows_E = 0
@@ -189,13 +188,12 @@ function variational_free_energy_creator(is_closed_form_gaussian::Bool, coef_fun
                 m.structure.n_total_params
             )
         else
-            variational_expectation = mean(m.log_posterior(m, samples))
+            variational_expectation = mean(m.log_posterior(m, w₀))
         end
 
-        mapped_log_likelihood = (m, X, y) -> (w -> m.log_likelihood(m, w, X, y))
+        log_joint_distribution = mean(log_density(m, samples, X, y, coef = coef))
 
-        return coef * (variational_expectation - flows_E) - 
-            mean(log_density(m, samples, X, y, coef = coef))
+        return coef * (variational_expectation - flows_E) - log_joint_distribution
     end
 end
 
