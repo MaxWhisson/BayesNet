@@ -11,13 +11,13 @@ include("../test_helper_functions/sample_models.jl")
 # D is the dimension of the parameter vector here
 function test_PlanarFlowLayer_func_size_1(D)
     z = ones(D)
-    flow_layer = BayesNet.PlanarFlowLayer(D, logistic)
+    flow_layer = BayesNet.PlanarFlowLayer(D)
     size(flow_layer.func(randn(flow_layer.n_params))(z)) == size(z)
 end
 
 function test_PlanarFlowLayer_jacobian_determinant_size_1(D)
     z = ones(D)
-    flow_layer = BayesNet.PlanarFlowLayer(D, logistic)
+    flow_layer = BayesNet.PlanarFlowLayer(D)
     flow_layer.jacobian_determinant(randn(flow_layer.n_params))(z)
     true # just checking that the function doesn't cause a matrix dimension error
 end
@@ -30,7 +30,7 @@ end
 
 function test_RadialFlowLayer_jacobian_determinant_size_1(D)
     z = ones(D)
-    flow_layer = BayesNet.PlanarFlowLayer(D, logistic)
+    flow_layer = BayesNet.PlanarFlowLayer(D)
     flow_layer.jacobian_determinant(randn(flow_layer.n_params))(z)
     true # just checking that the function doesn't cause a matrix dimension error
 end
@@ -38,7 +38,7 @@ end
 function test_flow_chain_1(D)
     z = ones(D)
     flow_layers = [
-        BayesNet.PlanarFlowLayer(D, logistic), 
+        BayesNet.BayesNet.PlanarFlowLayer(D), 
         BayesNet.RadialFlowLayer(D), 
         BayesNet.RadialFlowLayer(D)
     ]

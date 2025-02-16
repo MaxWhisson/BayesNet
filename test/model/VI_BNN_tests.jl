@@ -77,11 +77,19 @@ function test_flow_transforms_1(n_inputs)
     m = make_test_VI_model(n_inputs, true, 1)
     D = m.structure.n_total_params # number of weights
     flow = [
-        BayesNet.PlanarFlowLayer(D, logistic), 
+        BayesNet.PlanarFlowLayer(D), 
         BayesNet.RadialFlowLayer(D), 
-        BayesNet.RadialFlowLayer(D)]
-    (wₖ, jacobian_det_sum) = BayesNet.flow_transforms(m, randn(sum((x->x.n_params).(flow))), ones(D))
-    (size(wₖ)[1] == D) && (size(jacobian_det_sum)[1] == D)
+        BayesNet.RadialFlowLayer(D)
+    ]
+    sample = randn(D)
+    params = randn((D + 2) + (D + 2) + (2D + 1))
+    transform = BayesNet.transform_sample(flow, params)
+    log_jac_det = BayesNet.sum_log_jacobian(flow, params)
+
+    wₖ = transform(sample)
+    jacobian_det_sum = log_jac_det(sample)
+
+    (length(wₖ) == D) && (typeof(jacobian_det_sum) == Float64)
 end
 
 function test_flow_transforms_2(n_inputs)
@@ -90,9 +98,32 @@ function test_flow_transforms_2(n_inputs)
     flow = [
         BayesNet.RadialFlowLayer(D)
     ]
-    samples = randn(sum((x->x.n_params).(flow)))
-    (wₖ, jacobian_det_sum) = BayesNet.flow_transforms(m, samples, ones(D))
-    (size(wₖ)[1] == D) && (size(jacobian_det_sum)[1] == D)
+
+    sample = randn(D)
+    params = randn((D + 2) + (D + 2) + (2D + 1))
+    transform = BayesNet.transform_sample(flow, params)
+    log_jac_det = BayesNet.sum_log_jacobian(flow, params)
+
+    wₖ = transform(sample)
+    jacobian_det_sum = log_jac_det(sample)
+
+    (length(wₖ) == D) && (typeof(jacobian_det_sum) == Float64)
+end
+
+function test_flow_transforms_3()
+    n_inputs = 1
+    flow = [
+        BayesNet.RadialFlowLayer(1)
+    ]
+
+    sample = [0]
+    params = [100, 0.541324854612918, 1]
+
+    res1 = flow[1].jacobian_determinant(params)(sample) |> abs |> log
+    log_jac_det = BayesNet.sum_log_jacobian(flow, params)
+    jacobian_det_sum = log_jac_det(sample)
+
+    res1 ≈ jacobian_det_sum
 end
 
 function test_variational_free_energy()
@@ -137,6 +168,7 @@ end
         @test test_flow_transforms_1(2)
         @test test_flow_transforms_1(7)
         @test test_flow_transforms_2(2)
+        @test test_flow_transforms_3()
     end
 
     @testset "probability distributions" begin

@@ -7,6 +7,7 @@ include("Training.jl")
 include("model/LaplaceBNN.jl") 
 include("model/VI_BNN.jl") 
 include("model/MCMC_BNN.jl") 
+include("Visualisation.jl")
 
 using .HelperFunctions
 using .Models
@@ -15,5 +16,6 @@ using .Training
 using .LaplaceBNN
 using .VI_BNN
 using .MCMC_BNN
+using .Visualisation
 
 end
