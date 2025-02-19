@@ -16,7 +16,8 @@ export  VariationalFullGaussianModel,
         variational_free_energy_creator,
         normalising_flow_density,
         transform_sample,
-        sum_log_jacobian
+        sum_log_jacobian,
+        predict_VI
 
 # dependencies:
 using LinearAlgebra
@@ -33,7 +34,7 @@ using ..HelperFunctions
 function VariationalGaussianModel(prior_creator::Function, 
         log_likelihood::Function, n_inputs::Int, is_diagonal::Bool, 
         layers::Vector{Models.Layer}; 
-        normalising_flow::AbstractArray{Models.NormalisingFlowLayer} = [])
+        normalising_flow::AbstractArray = [])
 
     n_weights = n_inputs * layers[1].n +
         sum([layers[i].n * layers[i + 1].n for i in 1:length(layers) - 1])
@@ -70,7 +71,7 @@ end
 
 function VariationalUnitGaussianModel(log_likelihood::Function, 
         n_inputs::Int, layers::Vector{Models.Layer}; 
-        normalising_flow::AbstractArray{Models.NormalisingFlowLayer} = [])
+        normalising_flow::AbstractArray = [])
 
     n_weights = n_inputs * layers[1].n +
         sum([layers[i].n * layers[i + 1].n for i in 1:length(layers) - 1])
@@ -98,7 +99,7 @@ end
 # simpler constructor for model architectures with full Gaussian weights.
 function VariationalFullGaussianModel(log_likelihood::Function, n_inputs::Int,
         layers::Vector{Models.Layer}; 
-        normalising_flow::AbstractArray{Models.NormalisingFlowLayer} = [])
+        normalising_flow::AbstractArray = [])
     VariationalGaussianModel(
         diagonal_gaussian_prior_creator,
         log_likelihood, 
@@ -112,7 +113,7 @@ end
 # simpler constructor for model architectures with diagonal Gaussian weights.
 function VariationalDiagonalGaussianModel(log_likelihood::Function, 
         n_inputs::Int, layers::Vector{Models.Layer}; 
-        normalising_flow::AbstractArray{Models.NormalisingFlowLayer} = [])
+        normalising_flow::AbstractArray = [])
     VariationalGaussianModel(
         diagonal_gaussian_prior_creator,
         log_likelihood, 
@@ -208,8 +209,8 @@ end
 
 function sum_log_jacobian(
         normalising_flow::AbstractArray{Models.NormalisingFlowLayer}, 
-        flow_params::Vector{Float64})
-    function f(w)
+        flow_params::AbstractArray{Float64})
+    function f(w::AbstractArray{Float64})
         log_jacobian_sum = 0
         param_index = 1
         for i in 1:length(normalising_flow)
@@ -261,7 +262,7 @@ function variational_free_energy_creator(is_closed_form_gaussian::Bool,
         coef_func::Function; 
         custom_log_density::Tuple{Bool, Function} = (false, x->x))
     function f(m::Models.Model, X::AbstractMatrix{Float64}, 
-            y::AbstractArray{Float64}, args::Training.TrainingParameters, 
+            y::AbstractArray, args::Training.TrainingParameters, 
             i::Int, M::Int)
         coef = coef_func(M, i)
 
@@ -318,7 +319,7 @@ function AL_datapoint_uncertainty(m::Models.Model, W::AbstractMatrix{Float64},
 end
 
 function find_uncertainties(m::Models.Model, X::AbstractMatrix{Float64}, 
-        y::AbstractArray{Float64}, U::AbstractMatrix{Float64}, 
+        y::AbstractArray, U::AbstractMatrix{Float64}, 
         args::Training.TrainingParameters, n_active_samples::Int)
     Training.train!(m, X, y, args)
     W = sample_model(m, n_active_samples)
@@ -328,7 +329,7 @@ function find_uncertainties(m::Models.Model, X::AbstractMatrix{Float64},
 end
 
 function active_learning(m::Models.Model, X::AbstractMatrix{Float64}, 
-        y::AbstractArray{Float64}, U::AbstractMatrix{Float64}, 
+        y::AbstractArray, U::AbstractMatrix{Float64}, 
         oracle::Function, args::Training.TrainArgs; 
         n_active_samples::Int = 10, threshold::Float64 = -Inf)
     max_uncertainty = Inf
@@ -346,6 +347,12 @@ function active_learning(m::Models.Model, X::AbstractMatrix{Float64},
     end
 
     return X[init_x_length + 1:end]
+end
+
+function predict_VI(m::Models.Model, X::AbstractMatrix{Float64}; n_samples::Int = 1)
+    W = m.weight_sampler(m.θ, n_samples, m.structure.n_total_params)
+    f = transform_sample(m.normalising_flow, m.θ[m.n_variational_params + 1:end])
+    mean((w -> pred(m.structure, f(w), X)).(eachcol(W)))
 end
 
 end

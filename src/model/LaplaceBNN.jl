@@ -31,14 +31,16 @@ function BuildLaplaceModel(priorCreator::Function, log_likelihood::Function,
     )
 end
 
-function MAP_loss_fn(m, X_batch, y_batch, args)
-    return log_density(m, m.θp[1:m.structure.n_total_params], X_batch, y_batch)
+function MAP_loss_fn(m::Models.LaplaceModel, X_batch::AbstractMatrix{Float64},
+        y_batch::AbstractArray, args::Training.TrainingParameters)
+    return log_density(m, m.θ[1:m.structure.n_total_params], X_batch, y_batch)
 end
 
 # find Hessian 
-function fit_covariance!(m, X, y, args)
+function fit_covariance!(m::Models.LaplaceModel, X::AbstractMatrix{Float64}, 
+        y::AbstractArray, args::Training.TrainingParameters)
     H = hessian(Params([m.θ])) do
-        log_density(m, m.θp[1:m.structure.n_total_params], X_batch, y_batch)
+        log_density(m, m.θ[1:m.structure.n_total_params], X_batch, y_batch)
     end
     m.θ[m.structure.n_total_params + 1:end] = reshape(H, (1,:))
 end

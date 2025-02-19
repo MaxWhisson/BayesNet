@@ -1,5 +1,7 @@
 using Test
 
+# tests are mainly to assert that things don't crash
+
 @testset "All Tests" begin
     @testset "VI tests" begin
         include("model/VI_BNN_tests.jl")

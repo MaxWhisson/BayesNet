@@ -116,8 +116,8 @@ function test_flow_transforms_3()
         BayesNet.RadialFlowLayer(1)
     ]
 
-    sample = [0]
-    params = [100, 0.541324854612918, 1]
+    sample = [0.0]
+    params = [100.0, 0.541324854612918, 1.0]
 
     res1 = flow[1].jacobian_determinant(params)(sample) |> abs |> log
     log_jac_det = BayesNet.sum_log_jacobian(flow, params)

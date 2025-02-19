@@ -8,7 +8,8 @@ export  Model,
         NormalisingFlowLayer,
         VariationalModel,
         LaplaceModel,
-        MCMC_Model
+        MCMC_Model,
+        DegenerateModel
 
 # function exports
 export  diagonal_gaussian_prior_creator,
@@ -20,7 +21,9 @@ export  diagonal_gaussian_prior_creator,
         multi_class_log_likelihood,
         regression_log_likelihood,
         log_density,
-        pred
+        pred,
+        prune_diagonal_gaussian_proportion,
+        prune_diagonal_gaussian_CI
 
 using Statistics
 using LinearAlgebra
@@ -86,6 +89,11 @@ mutable struct MCMC_Model <: Model
     structure::ModelStructure
     log_prior::ParameterisedFunction    # log prior on weights
     log_likelihood::Function            # likelihood of data for weights
+end
+
+mutable struct DegenerateModel <: Model
+    structure::ModelStructure
+    θ::Vector{Float64}
 end
 
 ##########################################################################
@@ -210,7 +218,7 @@ end
 function regression_log_likelihood(m::Model, w::AbstractArray{Float64}, 
         X::AbstractMatrix{Float64}, y::AbstractMatrix{Float64})
     col_outer_product = x -> x * x'
-    col_gaussian_exponent = Σ -> (x -> x' * Σ * x)
+    col_gaussian_exponent = Σ -> (x -> -x' * Σ * x)
 
     ŷ = pred(m.structure, w, X) # matrix of Float64, column samples
     mean_diff = ŷ .- mean(ŷ, dims=2)
@@ -259,16 +267,35 @@ function pred(s::ModelStructure, weights::AbstractArray{Float64},
 end
 
 # remove proportion of highest variance weights' variational parameters 
-function prune_diagonal_gaussian_proportion(m; proportion = 0.9)
+function prune_diagonal_gaussian_proportion!(m; proportion = 0.9)
     θ = m.θ[1:m.n_variational_params]
     log_σ = θ[m.structure.n_total_params + 1:end]
-    # TODO zip with indexes and sort
+    sorted = zip(log_σ, 1:m.structure.n_total_params) |> collect |> sort
+    # zero everything below this
+    cutoff_i = ceil((1 - proportion) * m.structure.n_total_params)
+
+    # indexes of params to be zeroed
+    to_zero = (x -> x[2]).(sorted)[1:cutoff_i]
+    m.θ[to_zero] .= 0 
+    m.θ[to_zero .+ m.structure.n_total_params] .= 0
 end
 
 # remove parameters for weights that are not significantly different
 # from 0
-function prune_diagonal_gaussian_CI(m; CI_probability = 0.9)
-    # TODO
+function prune_diagonal_gaussian_CI!(m; CI_probability = 0.95)
+    function f(μ, log_σ)
+        cdf(Normal(μ, exp(log_σ)), 0) > (1 - CI_probability) / 2
+    end
+
+    function g(offset, m)
+        function h(i)
+            if f(m.θ[i], m.θ[1 + offset])
+                m.θ[i], m.θ[1 + offset] = 0, 1
+            end
+        end
+    end
+        
+    g(m.structure.n_total_params, m).(1:m.structure.n_total_params)
 end
 
 end

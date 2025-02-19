@@ -11,9 +11,17 @@ function test_Laplace_model_constructor()
 end
 
 function test_MAP_loss_fn()
-    # TODO
+    m = make_binary_Laplace_model(
+        1,
+        [BayesNet.Layer(5, leaky_relu), BayesNet.Layer(1, logistic)]
+    )
+    X = [1.0 1.1]
+    y = BitVector([1;0])
+    println(typeof(BayesNet.MAP_loss_fn(m, X, y, BayesNet.TrainingParameters())))
+    typeof(BayesNet.MAP_loss_fn(m, X, y, BayesNet.TrainingParameters())) == Vector{Float64}
 end
 
 @testset "Laplace" begin
     @test test_Laplace_model_constructor()
+    @test test_MAP_loss_fn()
 end
