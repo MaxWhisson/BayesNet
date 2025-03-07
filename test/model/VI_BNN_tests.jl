@@ -135,6 +135,45 @@ function test_variational_free_energy()
     typeof(L) == Float64
 end
 
+function test_equivalent_posterior_densities(D)
+    m1 = BayesNet.VariationalDiagonalGaussianModel(
+        x -> x,
+        D,
+        [
+            # BayesNet.Layer(20, x -> x),
+            BayesNet.Layer(1, x -> x)
+        ]
+    )
+
+    m2 = BayesNet.VariationalFullGaussianModel(
+        x -> x,
+        D,
+        [
+            # BayesNet.Layer(20, x -> x),
+            BayesNet.Layer(1, x -> x)
+        ]
+    )
+
+    m1.θ[1:m1.structure.n_total_params] = zeros(m1.structure.n_total_params)
+    m2.θ[1:m1.structure.n_total_params] = zeros(m2.structure.n_total_params)
+
+    m1.θ[m1.structure.n_total_params + 1:end] = ones(m1.structure.n_total_params) * log(ℯ - 1)
+    init_L = -20ones(BayesNet.triangular(m2.structure.n_total_params))
+    global t = 0
+    for i in 1:m2.structure.n_total_params
+        global t += i
+        init_L[t] = log(ℯ - 1)
+    end
+    m2.θ[m2.structure.n_total_params + 1:end] = init_L
+
+    samples = 5randn(m1.structure.n_total_params, 2)
+
+    res1 = BayesNet.log_diagonal_gaussian_posterior(m1, samples)
+    res2 = BayesNet.log_full_gaussian_posterior(m2, samples)
+
+    res1 ≈ res2
+end
+
 ##########################################################################
 ####                            Test sets                             ####
 ##########################################################################
@@ -176,6 +215,7 @@ end
         @test test_log_diagonal_gaussian_posterior_size_correct(10)
         @test test_log_full_gaussian_posterior_size_correct(4)
         @test test_log_full_gaussian_posterior_size_correct(7)
+        @test test_equivalent_posterior_densities(1)
     end
 
     @testset "loss functions" begin

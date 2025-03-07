@@ -2,7 +2,8 @@ module Training
 
 # type exports
 export  TrainingParameters,
-        TrainArgs
+        TrainArgs,
+        PRIOR_OPTIMISATION
 
 # function exports
 export  train!
@@ -18,9 +19,9 @@ import ..Models
 
 Base.@kwdef struct TrainingParameters
     n_samples = 10
-    max_epoch = 50
+    max_epoch = 200
     batch_size = 20
-    optimiser_rule = Optimisers.Rprop() 
+    optimiser_rule = Optimisers.Adam() 
     prior_optimisation_strategy = NONE
     random_seed = -1
 end
@@ -56,7 +57,7 @@ function train!(m::Models.Model, X::Matrix{Float64}, y::AbstractArray, args::Tra
 
     optimiser_state = Optimisers.init(args.training_params.optimiser_rule, m.θ)
     no_batches = Int64(floor(length(y) / args.training_params.batch_size))
-    allLosses = Vector(undef, no_batches * args.training_params.max_epoch)
+    allLosses = Vector(undef, args.training_params.max_epoch)
     losses = Vector(undef, no_batches)
 
     @info "Training"
@@ -72,9 +73,9 @@ function train!(m::Models.Model, X::Matrix{Float64}, y::AbstractArray, args::Tra
 
             optimiser_state = update_parameters!(m, X_batch, y_batch, args, batch_i + 1, no_batches, optimiser_state)
             losses[batch_i + 1] = args.loss_fn(m, X_batch, y_batch, args.training_params, batch_i + 1, no_batches)
-            allLosses[(epoch - 1) * no_batches + batch_i + 1] = losses[batch_i + 1]
         end
-        if (epoch % 20 == 0)
+        allLosses[epoch] = sum(losses) 
+        if (epoch % 20 == 0) && (length(losses) > 0)
             @info "Mean loss of epoch $(epoch): $(mean(losses))"
         end
     end

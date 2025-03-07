@@ -61,3 +61,15 @@ function make_test_VI_regression_model(D::Int, is_diagonal::Bool, n_out::Int)
         [BayesNet.Layer(5, leaky_relu), BayesNet.Layer(n_out, x -> x)]
     )
 end
+
+function make_test_binary_MCMC(D)
+    BayesNet.Build_MCMC_Model(
+        BayesNet.diagonal_gaussian_prior_creator,
+        BayesNet.binary_log_likelihood,
+        D,
+        [
+            BayesNet.Layer(5, leaky_relu), 
+            BayesNet.Layer(1, logistic), 
+        ]
+    )
+end

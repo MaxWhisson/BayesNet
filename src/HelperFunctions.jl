@@ -6,7 +6,11 @@ export  propagate_matrix_opp,
         set_sub_array_expr,
         triangular,
         to_lower_triangular,
-        trace
+        trace,
+        set_sub_vector_expr,
+        init_L_diagonal_cov
+
+using Zygote
 
 function propagate_matrix_opp(matrix1, matrix2, i, f)                                                                                                                                                                                                                                                 
     matrix1[:,i + 1] = f(matrix2[:, i])                                                                                                                                                                                                                     
@@ -48,9 +52,46 @@ function to_lower_triangular(arr, D)
     return L
 end
 
+function flatten_triangular(L, D)
+    foldl(
+        ((flattened, next_i), i) -> (
+            set_sub_vector_expr(next_i, next_i + i - 1, flattened, L[i,1:i]),
+            next_i + i
+        ),
+        1:D,
+        init = (zeros(triangular(D)), 1)
+    )[1]
+end
+
+# hack, don't take gradient with respect to D
+@Zygote.adjoint to_lower_triangular(arr, D) = (
+    to_lower_triangular(arr, D),
+    L′ -> (flatten_triangular(L′, D), 0)
+)
+
+function init_L_diagonal_cov(D)
+    init_L = -20ones(triangular(D))
+    global t = 0
+    for i in 1:D
+        global t += i
+        init_L[t] = -10log(ℯ - 1)
+    end
+    init_L
+end
+
+function set_sub_vector_expr(i1, i2, arr, new_sub_arr)
+    arr[i1:i2] = new_sub_arr
+    arr
+end
+
 function trace(x, y)
     println(x)
     return y
+end
+
+function trace(x)
+    println(x)
+    return x
 end
 
 end

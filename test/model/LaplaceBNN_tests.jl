@@ -17,11 +17,36 @@ function test_MAP_loss_fn()
     )
     X = [1.0 1.1]
     y = BitVector([1;0])
-    println(typeof(BayesNet.MAP_loss_fn(m, X, y, BayesNet.TrainingParameters())))
-    typeof(BayesNet.MAP_loss_fn(m, X, y, BayesNet.TrainingParameters())) == Vector{Float64}
+    typeof(BayesNet.create_MAP_loss_fn()(m, X, y, BayesNet.TrainingParameters(), 0, 0)) == Float64
+end
+
+function test_fit_covariance()
+    m = make_binary_Laplace_model(
+        1,
+        [BayesNet.Layer(5, leaky_relu), BayesNet.Layer(1, logistic)]
+    )
+    before = m.θ[:]
+    X = [1.0 1.1]
+    y = BitVector([1;0])
+    BayesNet.create_fit_covariance()(m, X, y)
+    before != m.θ
+end
+
+function test_fit_gaussian()
+    m = make_binary_Laplace_model(
+        1,
+        [BayesNet.Layer(5, leaky_relu), BayesNet.Layer(1, logistic)]
+    )
+    before = m.θ[:]
+    X = [1.0 1.1]
+    y = BitVector([1;0])
+    BayesNet.fit_gaussian!(m, X, y, BayesNet.TrainingParameters(batch_size=2))
+    before != m.θ
 end
 
 @testset "Laplace" begin
     @test test_Laplace_model_constructor()
     @test test_MAP_loss_fn()
+    @test test_fit_covariance()
+    @test test_fit_gaussian()
 end

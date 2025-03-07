@@ -22,8 +22,9 @@ export  diagonal_gaussian_prior_creator,
         regression_log_likelihood,
         log_density,
         pred,
-        prune_diagonal_gaussian_proportion,
-        prune_diagonal_gaussian_CI
+        prune_diagonal_gaussian_proportion!,
+        prune_diagonal_gaussian_CI!,
+        produce_degenerate
 
 using Statistics
 using LinearAlgebra
@@ -100,13 +101,23 @@ end
 ####                            Functions                             ####
 ##########################################################################
 
+function produce_degenerate(layers::Vector{Layer}, n_inputs::Int)
+    n_weights = n_inputs * layers[1].n +
+        sum([layers[i].n * layers[i + 1].n for i in 1:length(layers) - 1])
+    n_params = n_weights + sum(layers .|> (x -> x.n))
+    DegenerateModel(
+        ModelStructure(layers, n_inputs, n_params),
+        randn(n_params)
+    )
+end
+
 # function for creating diagonal gaussian parametrised priors
-function diagonal_gaussian_prior_creator(n_params::Int) 
+function diagonal_gaussian_prior_creator(n_params::Int; weight = 10) 
     return ParameterisedFunction(
-        [zeros(n_params);ones(n_params)], 
+        [zeros(n_params); weight * ones(n_params)], 
         θ -> w -> logpdf(MvNormal(
             θ[1:n_params], 
-            Diagonal(log.(1 .+ exp.(θ[n_params + 1:end])))
+            Diagonal(log.(1 .+ exp.(θ[n_params + 1:end])) .^ 2)
         ), w)
     )
 end
@@ -199,7 +210,7 @@ function softmax(z::AbstractArray{Float64})
 end
 
 # log likelihood for binary classification
-function binary_log_likelihood(m::Model, w::AbstractArray{Float64}, 
+function binary_log_likelihood(m::Model, w::AbstractArray, 
         X::AbstractMatrix{Float64}, y::BitVector)
     ŷ = pred(m.structure, w, X)' # vector of Float64
     return sum(y .* HelperFunctions.s_log.(ŷ) + (1 .- y) .* 
@@ -208,38 +219,36 @@ end
 
 # log likelihood for multi-class classification
 function multi_class_log_likelihood(m::Model, w::AbstractArray{Float64}, 
-        X::AbstractMatrix{Float64}, y::Vector{Int})
+        X::AbstractMatrix{Float64}, y::AbstractArray{Int})
     ŷ = pred(m.structure, w, X) # matrix of Float64, column samples
     normalised_ŷ = mapslices(softmax, ŷ, dims=1)
     return sum(HelperFunctions.s_log.(normalised_ŷ[y]))
 end
 
-# log likelihood for generalised multi-target regression
-function regression_log_likelihood(m::Model, w::AbstractArray{Float64}, 
-        X::AbstractMatrix{Float64}, y::AbstractMatrix{Float64})
-    col_outer_product = x -> x * x'
-    col_gaussian_exponent = Σ -> (x -> -x' * Σ * x)
-
-    ŷ = pred(m.structure, w, X) # matrix of Float64, column samples
-    mean_diff = ŷ .- mean(ŷ, dims=2)
-    sample_Σ = sum(col_outer_product.(eachcol(mean_diff))) / size(ŷ)[2]
-    error_diff = ŷ .- y
-
-    return sum(col_gaussian_exponent(sample_Σ).(eachcol(error_diff)))
+# log likelihood for mono-target regression
+function regression_log_likelihood(m::Model, w::AbstractArray, 
+        X::AbstractMatrix{Float64}, y::AbstractArray{Float64})
+    ŷ = pred(m.structure, w, X)'[:,1]
+    error_diff = ŷ - y
+    return -(error_diff' * error_diff)
 end
 
 # log P(D|w)P(w)
-function log_density(m::Model, w::AbstractArray{Float64}, 
+function log_density(m::Model, w::AbstractArray, 
         X::AbstractMatrix{Float64}, y::AbstractArray; coef = 1)
     mapped_log_likelihood = (m, X, y) -> (w -> m.log_likelihood(m, w, X, y))
     log_prior = m.log_prior.func(m.log_prior.θ)
-    return coef * log_prior.(eachcol(w)) + 
-        mapped_log_likelihood(m, X, y).(eachcol(w))
+
+    # println("$(mean(log_prior.(eachcol(w)))), $(mean(mapped_log_likelihood(m, X, y).(eachcol(w))))\n")
+    # return mean(mapped_log_likelihood(m, X, y).(eachcol(w)))
+
+    return coef * mean(log_prior.(eachcol(w))) + 
+        mean(mapped_log_likelihood(m, X, y).(eachcol(w)))
 end
 
 # forward pass of model architecture for data X and weights.
-function pred(s::ModelStructure, weights::AbstractArray{Float64}, 
-        X::AbstractMatrix{Float64})
+function pred(s::ModelStructure, weights::AbstractArray, 
+        X::AbstractArray)
 
     # initialise forward pass state
     output = X                      # previous layer output
@@ -272,17 +281,17 @@ function prune_diagonal_gaussian_proportion!(m; proportion = 0.9)
     log_σ = θ[m.structure.n_total_params + 1:end]
     sorted = zip(log_σ, 1:m.structure.n_total_params) |> collect |> sort
     # zero everything below this
-    cutoff_i = ceil((1 - proportion) * m.structure.n_total_params)
+    cutoff_i = ceil(proportion * m.structure.n_total_params)
 
     # indexes of params to be zeroed
-    to_zero = (x -> x[2]).(sorted)[1:cutoff_i]
+    to_zero = (x -> x[2]).(sorted)[1:Int(cutoff_i)]
     m.θ[to_zero] .= 0 
-    m.θ[to_zero .+ m.structure.n_total_params] .= 0
+    m.θ[to_zero .+ m.structure.n_total_params] .= -1000
 end
 
 # remove parameters for weights that are not significantly different
 # from 0
-function prune_diagonal_gaussian_CI!(m; CI_probability = 0.95)
+function prune_diagonal_gaussian_CI!(m; CI_probability = 0.9)
     function f(μ, log_σ)
         cdf(Normal(μ, exp(log_σ)), 0) > (1 - CI_probability) / 2
     end
@@ -290,7 +299,7 @@ function prune_diagonal_gaussian_CI!(m; CI_probability = 0.95)
     function g(offset, m)
         function h(i)
             if f(m.θ[i], m.θ[1 + offset])
-                m.θ[i], m.θ[1 + offset] = 0, 1
+                m.θ[i], m.θ[1 + offset] = 0, -1000
             end
         end
     end

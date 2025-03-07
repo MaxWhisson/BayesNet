@@ -17,13 +17,15 @@ export  VariationalFullGaussianModel,
         normalising_flow_density,
         transform_sample,
         sum_log_jacobian,
-        predict_VI
+        predict_VI,
+        active_learning!
 
 # dependencies:
 using LinearAlgebra
 using Distributions
 using Optimisers
 using Random
+using Zygote
 
 using ..Samplers
 using ..Models
@@ -83,7 +85,6 @@ function VariationalUnitGaussianModel(log_likelihood::Function,
 
     return VariationalModel(
         ModelStructure(layers, n_inputs, n_params),
-        # [100, 0, 2, 2],
         randn(n_flow_params),
         Samplers.unit_gaussian_sampler,
         diagonal_gaussian_prior_creator(n_params),
@@ -137,27 +138,27 @@ function log_diagonal_gaussian_posterior(m::Models.Model,
     return log_posterior_pdf.(eachcol(samples))
 end
 
-#evaluate log density on unit gaussian
-function log_unit_gaussian_posterior(m::Models.Model, 
-        samples::AbstractMatrix{Float64})
-    n_params = m.structure.n_total_params
-    log_posterior_pdf = sample -> logpdf(MvNormal(zeros(n_params), I), sample)
-    return log_posterior_pdf.(eachcol(samples))
-end
-
 # evaluate log density of samples on full gaussian
 function log_full_gaussian_posterior(m::Models.Model, 
         samples::AbstractMatrix{Float64})
     variational_params = m.θ[1:m.n_variational_params]
     n_params = m.structure.n_total_params
     L = HelperFunctions.to_lower_triangular(
-        log.(1 .+ exp.(variational_params[n_params + 1:end]))
+        log.(1 .+ exp.(variational_params[n_params + 1:end])), n_params
     )
 
     log_posterior_pdf = sample -> logpdf(MvNormal(
         variational_params[1:n_params], 
         L * L'
     ), sample)
+    return log_posterior_pdf.(eachcol(samples))
+end
+
+#evaluate log density on unit gaussian
+function log_unit_gaussian_posterior(m::Models.Model, 
+        samples::AbstractMatrix{Float64})
+    n_params = m.structure.n_total_params
+    log_posterior_pdf = sample -> logpdf(MvNormal(zeros(n_params), I), sample)
     return log_posterior_pdf.(eachcol(samples))
 end
 
@@ -264,10 +265,11 @@ function variational_free_energy_creator(is_closed_form_gaussian::Bool,
     function f(m::Models.Model, X::AbstractMatrix{Float64}, 
             y::AbstractArray, args::Training.TrainingParameters, 
             i::Int, M::Int)
-        coef = coef_func(M, i)
+        coef_reweighting = coef_func(M, i)
 
         # samples from approximate posterior
         variational_params = m.θ[1:m.n_variational_params]
+
         w₀ = m.weight_sampler(
             variational_params, 
             args.n_samples, 
@@ -275,19 +277,21 @@ function variational_free_energy_creator(is_closed_form_gaussian::Bool,
         )
 
         # normalising flow then E_Q[Q()]
-        (samples, flows_E) = evaluate_normalising_flow(m, w₀)  
+        (samples, flows_E) = evaluate_normalising_flow(m, w₀)
         variational_expectation = evaluate_variational_posterior_expectation(
             m, is_closed_form_gaussian, w₀)
 
         if (custom_log_density[1])
             log_joint_distribution = mean(custom_log_density[2](samples))
         else
-            log_joint_distribution = mean(
-                log_density(m, samples, X, y, coef = coef)
-            )
+            log_joint_distribution = log_density(m, samples, X, y, 
+                coef = coef_reweighting)
         end
 
-        return coef * (variational_expectation - flows_E) - 
+        # print("$(coef_reweighting * (variational_expectation - flows_E)) ") 
+        # println("$(-log_joint_distribution)")
+
+        return coef_reweighting * (variational_expectation - flows_E) - 
             log_joint_distribution
     end
 end
@@ -311,45 +315,80 @@ function AL_datapoint_uncertainty(m::Models.Model, W::AbstractMatrix{Float64},
     coef1 = 1 / size(W)[2]
     coef2 = 1 / (size(W)[2] - 1)
 
-    preds = map(w -> pred(m.structure, w, x), eachcol(W))
-    ŷ = coef1 * sum(preds, dims=2)
-    f = pred -> (pred - ŷ) * (pred - ŷ)'
-    Σ = coef2 * sum(map(f, eachcol(preds)))
-    return det(Σ)
+    preds = map(w -> pred(m.structure, w, reshape(x, (1,1))[:]), eachcol(W))
+    ŷ = coef1 * sum(preds)
+
+    f = p -> (p - ŷ) * (p - ŷ)'
+    Σ = coef2 * sum(f.(preds))
+
+    return tr(Σ)
 end
 
-function find_uncertainties(m::Models.Model, X::AbstractMatrix{Float64}, 
-        y::AbstractArray, U::AbstractMatrix{Float64}, 
-        args::Training.TrainingParameters, n_active_samples::Int)
-    Training.train!(m, X, y, args)
+function update_online_diagonal_gaussian_posterior!(
+        m::Models.VariationalModel, n_active_samples::Int, 
+        x::AbstractArray{Float64}, y::AbstractArray{Float64})
+    n_params = m.structure.n_total_params
+    function log_expectation_of_exponential(θ)
+        W =m.weight_sampler(θ, n_active_samples, n_params)
+        log(mean(exp.(
+            (w -> log_density(m, w, reshape(x, length(x), 1), y)).(eachcol(W))
+        )))
+    end
+
+    g = gradient(
+        θ -> log_expectation_of_exponential(vcat(θ, m.θ[n_params + 1:2n_params])),
+        m.θ[1:n_params]
+    )[1]
+
+    H = hessian(
+        θ -> log_expectation_of_exponential(vcat(θ, m.θ[n_params + 1:2n_params])),
+        m.θ[1:n_params]
+    )
+
+    # only for full gaussian TODO fix?
+    m.θ[1:n_params] += m.θ[n_params + 1:2n_params] .* g
+    m.θ[n_params + 1:2n_params] += m.θ[n_params + 1:2n_params] .^ 2 .* diag(H)
+end
+
+function find_uncertainties(m::Models.VariationalModel, 
+        y::AbstractArray, U::AbstractMatrix{Float64}, n_active_samples::Int)
     W = sample_model(m, n_active_samples)
 
     uncertainties = map(x -> AL_datapoint_uncertainty(m, W, x), eachcol(U))
     return uncertainties
 end
 
-function active_learning(m::Models.Model, X::AbstractMatrix{Float64}, 
-        y::AbstractArray, U::AbstractMatrix{Float64}, 
-        oracle::Function, args::Training.TrainArgs; 
-        n_active_samples::Int = 10, threshold::Float64 = -Inf)
+function active_learning!(m::Models.VariationalModel, 
+        X::AbstractMatrix{Float64}, y::AbstractArray, 
+        U::AbstractMatrix{Float64}, oracle::Function, 
+        args::Training.TrainArgs, iterations::Int; n_active_samples::Int = 10, 
+        threshold::Float64 = -Inf)
     max_uncertainty = Inf
     init_x_length = size(X)[2]
+    Training.train!(m, X, y, args)
 
-    while (U != []) && (max_uncertainty > threshold)
-        uncertainties = find_uncertainties(m, X, y, U, args, n_active_samples)
-        max_uncertainty_i = argmax(uncertainties)[2]
+    i = 1
+    while (U != []) && (max_uncertainty > threshold) && i <= iterations
+        i = i + 1
+        uncertainties = find_uncertainties(m, y, U, n_active_samples)
+        max_uncertainty_i = argmax(uncertainties)
         max_uncertainty = uncertainties[max_uncertainty_i]
         Ux_max = U[:,max_uncertainty_i]
+        Uy_max = oracle(Ux_max)
 
         U = U[1:end, 1:end .!= max_uncertainty_i]
         X = [X Ux_max]
-        y = [y oracle(Ux_max)]
+        y = [y Uy_max]
+
+        update_online_diagonal_gaussian_posterior!(m, n_active_samples,
+            Ux_max, Uy_max)
     end
 
     return X[init_x_length + 1:end]
 end
 
-function predict_VI(m::Models.Model, X::AbstractMatrix{Float64}; n_samples::Int = 1)
+function predict_VI(m::Models.VariationalModel, X::AbstractMatrix{Float64}; 
+        n_samples::Int = 1)
     W = m.weight_sampler(m.θ, n_samples, m.structure.n_total_params)
     f = transform_sample(m.normalising_flow, m.θ[m.n_variational_params + 1:end])
     mean((w -> pred(m.structure, f(w), X)).(eachcol(W)))
