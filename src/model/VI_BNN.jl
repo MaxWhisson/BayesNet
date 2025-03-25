@@ -32,47 +32,8 @@ using ..Models
 using ..Training
 using ..HelperFunctions
 
-# constructor for Gaussian Variational models
-function VariationalGaussianModel(prior_creator::Function, 
-        log_likelihood::Function, n_inputs::Int, is_diagonal::Bool, 
-        layers::Vector{Models.Layer}; 
-        normalising_flow::AbstractArray = [])
-
-    n_weights = n_inputs * layers[1].n +
-        sum([layers[i].n * layers[i + 1].n for i in 1:length(layers) - 1])
-    n_params = n_weights + sum(layers .|> (x -> x.n))
-
-    n_variational_params = is_diagonal ? 
-        n_params * 2 : 
-        n_params + HelperFunctions.triangular(n_params)
-
-    instantiated_flow = map(f -> f(n_params), normalising_flow) 
-    n_flow_params = instantiated_flow != [] ? 
-        sum((x -> x.n_params).(instantiated_flow)) : 0
-
-    sampler = is_diagonal ? 
-        diagonal_gaussian_sampler : 
-        full_gaussian_sampler
-    posterior = is_diagonal ? 
-        log_diagonal_gaussian_posterior : 
-        log_full_gaussian_posterior
-
-    return VariationalModel(
-        ModelStructure(layers, n_inputs, n_params),
-        randn(n_variational_params + n_flow_params),
-        sampler,
-        prior_creator(n_params),
-        log_likelihood,
-        posterior,
-
-        instantiated_flow,
-        n_variational_params,
-        n_flow_params
-    )
-end
-
 function VariationalUnitGaussianModel(log_likelihood::Function, 
-        n_inputs::Int, layers::Vector{Models.Layer}; 
+        n_inputs::Int, layers::Vector; 
         normalising_flow::AbstractArray = [])
 
     n_weights = n_inputs * layers[1].n +
@@ -97,31 +58,94 @@ function VariationalUnitGaussianModel(log_likelihood::Function,
     )
 end
 
+# constructor for Gaussian Variational models
+function VariationalGaussianModel(prior_creator::Function, 
+        log_likelihood::Function, n_inputs::Int, is_diagonal::Bool, 
+        layers::Vector; 
+        normalising_flow::AbstractArray = [], 
+        init_param_fn = (n ->(n[1], randn(n[1] + n_f[2]))))
+
+    n_weights = n_inputs * layers[1].n +
+        sum([layers[i].n * layers[i + 1].n for i in 1:length(layers) - 1])
+    n_params = n_weights + sum(layers .|> (x -> x.n))
+
+    instantiated_flow = map(f -> f(n_params), normalising_flow) 
+    n_flow_params = instantiated_flow != [] ? 
+        sum((x -> x.n_params).(instantiated_flow)) : 0
+
+    sampler = is_diagonal ? 
+        diagonal_gaussian_sampler : 
+        full_gaussian_sampler
+    posterior = is_diagonal ? 
+        log_diagonal_gaussian_posterior : 
+        log_full_gaussian_posterior
+
+    (n_variational_params, init_vals) = init_param_fn(n_params, n_flow_params)
+    return VariationalModel(
+        ModelStructure(layers, n_inputs, n_params),
+        init_vals,
+        sampler,
+        prior_creator(n_params),
+        log_likelihood,
+        posterior,
+
+        instantiated_flow,
+        n_variational_params,
+        n_flow_params
+    )
+end
+
 # simpler constructor for model architectures with full Gaussian weights.
 function VariationalFullGaussianModel(log_likelihood::Function, n_inputs::Int,
-        layers::Vector{Models.Layer}; 
+        layers::Vector; 
         normalising_flow::AbstractArray = [])
+
+    function init_param_fn_full(n, n_f)
+        init_L = -20ones(HelperFunctions.triangular(n))
+        t = 0
+        for i in 1:n
+            t += i
+            init_L[t] = -5
+        end
+
+        layer_means_init = HelperFunctions.init_means(layers, n_inputs)
+        normalising_init = randn(n_f) # TODO
+
+        n + HelperFunctions.triangular(n), [layer_means_init;init_L;normalising_init]
+    end
+
     VariationalGaussianModel(
         diagonal_gaussian_prior_creator,
         log_likelihood, 
         n_inputs, 
         false, 
         layers, 
-        normalising_flow = normalising_flow
+        normalising_flow = normalising_flow,
+        init_param_fn = init_param_fn_full
     )
 end
 
 # simpler constructor for model architectures with diagonal Gaussian weights.
 function VariationalDiagonalGaussianModel(log_likelihood::Function, 
-        n_inputs::Int, layers::Vector{Models.Layer}; 
+        n_inputs::Int, layers::Vector; 
         normalising_flow::AbstractArray = [])
+
+    function init_param_fn_diag(n, n_f)
+        init_log_σ = ones(n) * -5
+        layer_means_init = HelperFunctions.init_means(layers, n_inputs)
+        normalising_init = randn(n_f) # TODO
+
+        2 * n, [layer_means_init;init_log_σ;normalising_init]
+    end
+
     VariationalGaussianModel(
         diagonal_gaussian_prior_creator,
         log_likelihood, 
         n_inputs, 
         true, 
         layers, 
-        normalising_flow = normalising_flow
+        normalising_flow = normalising_flow,
+        init_param_fn = init_param_fn_diag
     )
 end
 
@@ -165,7 +189,7 @@ end
 # closed form solution to integral of variational posterior for Gaussians as
 # used by BBVI.
 function gaussian_entropy(log_σ::Vector{Float64}, dims::Int)
-	return 0.5 * dims * (1 + log(2π) + sum(log_σ))
+	return 0.5 * dims * (1 + log(2π)) + sum(log_σ)
 end
 
 function uniform_complexity_cost(M::Int, i::Int)
@@ -250,6 +274,7 @@ end
 function evaluate_variational_posterior_expectation(m::Models.Model, 
         is_closed_form_gaussian::Bool, w₀::AbstractArray{Float64})
     if (is_closed_form_gaussian)
+        variational_params = m.θ[1:m.n_variational_params]
         return -gaussian_entropy(
             variational_params[m.structure.n_total_params + 1:end], 
             m.structure.n_total_params
@@ -288,12 +313,49 @@ function variational_free_energy_creator(is_closed_form_gaussian::Bool,
                 coef = coef_reweighting)
         end
 
-        # print("$(coef_reweighting * (variational_expectation - flows_E)) ") 
-        # println("$(-log_joint_distribution)")
-
         return coef_reweighting * (variational_expectation - flows_E) - 
             log_joint_distribution
     end
+end
+
+# simplified batch Bayes by Backprop objective without normalising flows
+function KL_divergence_objective(f::Models.DegenerateModel, m::Models.Model, 
+        i::Int, M::Int, coef_func::Function)
+    function g(X::AbstractMatrix{Float64}, w::AbstractArray, y::AbstractArray)
+        coef = coef_func(M, i)
+        coef * m.log_posterior(m, w) - log_density(m, w, X, y, coef = coef)
+    end
+end
+
+function Langevin_Stein_objective(f::Models.DegenerateModel, m::Models.Model, 
+        i::Int, M::Int, coef_func::Function)
+    function g(X::AbstractMatrix{Float64}, w::AbstractArray, y::AbstractArray)
+        ∇w = gradient(Params([w])) do
+            log_density(m, w, X, y, coef = coef_func(M, i))
+        end[w]
+        ∇f = (gradient(Params([w])) do
+            pred(f.structure, w, X)
+        end[w]) |> sum
+        ∇w'pred(f.structure, w, X) + ∇f
+    end
+end
+
+# VI Operator Objective
+function create_variational_operator
+function variational_operator_objective(m::Models.model, 
+        f::Models.DegenerateModel, X::AbstractMatrix{Float64}, 
+        y::AbstractArray, operator::function, 
+        args::Training.TrainingParameters, i::Int, M::Int; 
+        t::Function=(x -> x^2), coef_func::Function=uniform_complexity_cost)
+    
+    W = m.weight_sampler(
+        variational_params, 
+        args.n_samples, 
+        m.structure.n_total_params
+    )
+
+    operator_objective = operator(f, m, i, M, coef_func)
+    mean((w -> operator_objective(X, w, y)).(eachcol(W))) |> t
 end
 
 function sample_model(m::Models.Model, n_samples::Integer)
@@ -315,7 +377,7 @@ function AL_datapoint_uncertainty(m::Models.Model, W::AbstractMatrix{Float64},
     coef1 = 1 / size(W)[2]
     coef2 = 1 / (size(W)[2] - 1)
 
-    preds = map(w -> pred(m.structure, w, reshape(x, (1,1))[:]), eachcol(W))
+    preds = map(w -> pred(m.structure, w, reshape(x, (:,1))[:]), eachcol(W))
     ŷ = coef1 * sum(preds)
 
     f = p -> (p - ŷ) * (p - ŷ)'
@@ -329,11 +391,13 @@ function update_online_diagonal_gaussian_posterior!(
         x::AbstractArray{Float64}, y::AbstractArray{Float64})
     n_params = m.structure.n_total_params
     function log_expectation_of_exponential(θ)
-        W =m.weight_sampler(θ, n_active_samples, n_params)
-        log(mean(exp.(
-            (w -> log_density(m, w, reshape(x, length(x), 1), y)).(eachcol(W))
-        )))
+        W = m.weight_sampler(θ, n_active_samples, n_params)
+        log(mean(
+            (w -> exp(m.log_likelihood(m, w, reshape(x, length(x), 1), y))).(eachcol(W))
+        ))
     end
+
+    Σ_diag = exp.(m.θ[n_params + 1:2n_params]) .^ 2
 
     g = gradient(
         θ -> log_expectation_of_exponential(vcat(θ, m.θ[n_params + 1:2n_params])),
@@ -345,9 +409,11 @@ function update_online_diagonal_gaussian_posterior!(
         m.θ[1:n_params]
     )
 
-    # only for full gaussian TODO fix?
-    m.θ[1:n_params] += m.θ[n_params + 1:2n_params] .* g
-    m.θ[n_params + 1:2n_params] += m.θ[n_params + 1:2n_params] .^ 2 .* diag(H)
+    m.θ[1:n_params] += 0.1 * Σ_diag .* g
+    m.θ[n_params + 1:2n_params] = (
+        Σ_diag .+ 
+        Σ_diag .^ 2 .* diag(H)
+    ) .^ 0.5 .|> log
 end
 
 function find_uncertainties(m::Models.VariationalModel, 
@@ -361,30 +427,36 @@ end
 function active_learning!(m::Models.VariationalModel, 
         X::AbstractMatrix{Float64}, y::AbstractArray, 
         U::AbstractMatrix{Float64}, oracle::Function, 
-        args::Training.TrainArgs, iterations::Int; n_active_samples::Int = 10, 
-        threshold::Float64 = -Inf)
+        args::Training.TrainArgs, iterations::Int; n_active_samples::Int = 20, 
+        threshold::Float64 = -Inf, retrains = true)
     max_uncertainty = Inf
     init_x_length = size(X)[2]
-    Training.train!(m, X, y, args)
 
     i = 1
-    while (U != []) && (max_uncertainty > threshold) && i <= iterations
-        i = i + 1
+    while true
         uncertainties = find_uncertainties(m, y, U, n_active_samples)
         max_uncertainty_i = argmax(uncertainties)
         max_uncertainty = uncertainties[max_uncertainty_i]
         Ux_max = U[:,max_uncertainty_i]
-        Uy_max = oracle(Ux_max)
+        Uy_max = oracle(Ux_max)[1]
 
         U = U[1:end, 1:end .!= max_uncertainty_i]
         X = [X Ux_max]
-        y = [y Uy_max]
+        y = [y;Uy_max]
+        
+        i = i + 1
 
-        update_online_diagonal_gaussian_posterior!(m, n_active_samples,
-            Ux_max, Uy_max)
+        if retrains
+            Training.train!(m, X, y, args)
+        else
+            update_online_diagonal_gaussian_posterior!(m, n_active_samples,
+                Ux_max, [Uy_max])
+        end
+
+        if !((U != []) && (max_uncertainty > threshold) && i <= iterations)
+            return (X, y)
+        end
     end
-
-    return X[init_x_length + 1:end]
 end
 
 function predict_VI(m::Models.VariationalModel, X::AbstractMatrix{Float64}; 

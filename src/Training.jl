@@ -21,7 +21,7 @@ Base.@kwdef struct TrainingParameters
     n_samples = 10
     max_epoch = 200
     batch_size = 20
-    optimiser_rule = Optimisers.Adam() 
+    optimiser_rule = Optimisers.Adam(0.1) 
     prior_optimisation_strategy = NONE
     random_seed = -1
 end
@@ -40,7 +40,16 @@ function update_parameters!(m, X_batch, y_batch, args, i, M, optimiser_state)
 
     # optionally calculate gradients for prior of model
     if (args.training_params.prior_optimisation_strategy == PARALLEL)
-        # TODO calculate grads for m.log_prior.θ and update
+        ∇θ_prior = gradient(
+            () -> args.loss_fn(m, X_batch, y_batch, args.training_params, i, M),
+            Params([m.log_prior.θ])
+        )[m.log_prior.θ]
+        (prior_optimiser_state, Δθ_prior) = Optimisers.apply!(
+            m.log_prior.optimiser_rule, 
+            m.log_prior.optimiser_state, 
+            m.log_prior.θ, 
+            ∇θ_prior
+        )
     end
 
     # and update with optimiser:

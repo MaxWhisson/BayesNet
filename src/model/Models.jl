@@ -2,7 +2,8 @@ module Models
 
 # type exports
 export  Model, 
-        Layer, 
+        Layer,
+        DenseLayer,
         ModelStructure, 
         ParameterisedFunction,
         NormalisingFlowLayer,
@@ -22,8 +23,6 @@ export  diagonal_gaussian_prior_creator,
         regression_log_likelihood,
         log_density,
         pred,
-        prune_diagonal_gaussian_proportion!,
-        prune_diagonal_gaussian_CI!,
         produce_degenerate
 
 using Statistics
@@ -32,14 +31,24 @@ using Zygote
 using Distributions
 using LogExpFunctions
 using ..HelperFunctions
+using Optimisers
+
+abstract type Layer end
+
+abstract type Model end
 
 # struct for specifying a dense neural network layer.
-struct Layer
+struct DenseLayer <: Layer
     n::Int                # number of neurons in layer
     activation::Function    # activation function
 end
 
-abstract type Model end
+# struct for specifying a residual neural network layer.
+struct ResidualLayer <: Layer
+    n1::Int
+    n2::Int
+    activation::Function
+end
 
 # struct for creating model architectures.
 struct ModelStructure
@@ -51,6 +60,8 @@ end
 # struct for parameterised priors
 # * function is θ -> x -> Type parameterised over θ
 mutable struct ParameterisedFunction
+    optimiser_state
+    optimiser_rule
     θ::Vector{Float64}
     func::Function
 end
@@ -101,7 +112,7 @@ end
 ####                            Functions                             ####
 ##########################################################################
 
-function produce_degenerate(layers::Vector{Layer}, n_inputs::Int)
+function produce_degenerate(layers::Vector, n_inputs::Int)
     n_weights = n_inputs * layers[1].n +
         sum([layers[i].n * layers[i + 1].n for i in 1:length(layers) - 1])
     n_params = n_weights + sum(layers .|> (x -> x.n))
@@ -112,13 +123,15 @@ function produce_degenerate(layers::Vector{Layer}, n_inputs::Int)
 end
 
 # function for creating diagonal gaussian parametrised priors
-function diagonal_gaussian_prior_creator(n_params::Int; weight = 10) 
+function diagonal_gaussian_prior_creator(n_params::Int; weight = log(0.1)) 
+    θ = [zeros(n_params); weight]
+    rule = Optimisers.Adam(0.1)
+    state = Optimisers.init(rule, θ)
     return ParameterisedFunction(
-        [zeros(n_params); weight * ones(n_params)], 
-        θ -> w -> logpdf(MvNormal(
-            θ[1:n_params], 
-            Diagonal(log.(1 .+ exp.(θ[n_params + 1:end])) .^ 2)
-        ), w)
+        rule,
+        state,
+        θ,
+        θ -> w -> -exp.(weight) * w'w
     )
 end
 
@@ -211,7 +224,7 @@ end
 
 # log likelihood for binary classification
 function binary_log_likelihood(m::Model, w::AbstractArray, 
-        X::AbstractMatrix{Float64}, y::BitVector)
+        X::AbstractMatrix{Float64}, y::AbstractArray{Float64})
     ŷ = pred(m.structure, w, X)' # vector of Float64
     return sum(y .* HelperFunctions.s_log.(ŷ) + (1 .- y) .* 
         HelperFunctions.s_log.(1 .- ŷ))
@@ -229,8 +242,14 @@ end
 function regression_log_likelihood(m::Model, w::AbstractArray, 
         X::AbstractMatrix{Float64}, y::AbstractArray{Float64})
     ŷ = pred(m.structure, w, X)'[:,1]
+    N = length(y)
     error_diff = ŷ - y
-    return -(error_diff' * error_diff)
+
+    # TODO
+    # σ2 = (1/N) * (error_diff' * error_diff)
+    σ2 = 0.01
+
+    return -(1/(2 *σ2)) * (error_diff' * error_diff)
 end
 
 # log P(D|w)P(w)
@@ -240,7 +259,6 @@ function log_density(m::Model, w::AbstractArray,
     log_prior = m.log_prior.func(m.log_prior.θ)
 
     # println("$(mean(log_prior.(eachcol(w)))), $(mean(mapped_log_likelihood(m, X, y).(eachcol(w))))\n")
-    # return mean(mapped_log_likelihood(m, X, y).(eachcol(w)))
 
     return coef * mean(log_prior.(eachcol(w))) + 
         mean(mapped_log_likelihood(m, X, y).(eachcol(w)))
@@ -259,52 +277,36 @@ function pred(s::ModelStructure, weights::AbstractArray,
     # iterate over the layers of the network
     for i in 1:length(s.layers)
         # get weights and biases of current layer
-        layer_weights = weights[
-            next_i_w:next_i_w + w_offset * s.layers[i].n - 1
-        ]
-        layer_weights = reshape(layer_weights, (s.layers[i].n, w_offset))
-        
-        biases = weights[end - next_i_b - s.layers[i].n + 1: end - next_i_b]
-        next_i_b = next_i_b + s.layers[i].n
+        if typeof(s.layers[i]) == DenseLayer
+            layer_weights = weights[next_i_w:next_i_w + w_offset * s.layers[i].n - 1]
+            layer_weights = reshape(layer_weights, (s.layers[i].n, w_offset))
+            biases = weights[end - next_i_b - s.layers[i].n + 1: end - next_i_b]
+            next_i_w = next_i_w + w_offset * s.layers[i].n
+            next_i_b = next_i_b + s.layers[i].n
 
-        # update forward pass state
-        output = s.layers[i].activation.(layer_weights * output .+ biases)
-        next_i_w = next_i_w + w_offset * s.layers[i].n
-        w_offset = s.layers[i].n
-    end
-    return output
-end
+            # update forward pass state
+            output = s.layers[i].activation.(layer_weights * output .+ biases)
+            w_offset = s.layers[i].n
+            
+        elseif typeof(s.layers[i]) == ResidualLayer
+            layer_weights_1 = weights[next_i_w:next_i_w + w_offset * s.layers[i].n1 - 1]
+            layer_weights_1 = reshape(layer_weights_1, (s.layers[i].n1, w_offset))
+            biases_1 = weights[end - next_i_b - s.layers[i].n1 + 1: end - next_i_b]
+            next_i_w = next_i_w + w_offset * s.layers[i].n1
+            next_i_b = next_i_b + s.layers[i].n1
 
-# remove proportion of highest variance weights' variational parameters 
-function prune_diagonal_gaussian_proportion!(m; proportion = 0.9)
-    θ = m.θ[1:m.n_variational_params]
-    log_σ = θ[m.structure.n_total_params + 1:end]
-    sorted = zip(log_σ, 1:m.structure.n_total_params) |> collect |> sort
-    # zero everything below this
-    cutoff_i = ceil(proportion * m.structure.n_total_params)
+            layer_weights_2 = weights[next_i_w:next_i_w + s.layers[i].n1 * s.layers[i].n2 - 1]
+            layer_weights_2 = reshape(layer_weights_2, (s.layers[i].n2, w_offset))
+            biases_2 = weights[end - next_i_b - s.layers[i].n2 + 1: end - next_i_b]
+            next_i_w = next_i_w + s.layers[i].n1 * s.layers[i].n2
+            next_i_b = next_i_b + s.layers[i].n2
 
-    # indexes of params to be zeroed
-    to_zero = (x -> x[2]).(sorted)[1:Int(cutoff_i)]
-    m.θ[to_zero] .= 0 
-    m.θ[to_zero .+ m.structure.n_total_params] .= -1000
-end
-
-# remove parameters for weights that are not significantly different
-# from 0
-function prune_diagonal_gaussian_CI!(m; CI_probability = 0.9)
-    function f(μ, log_σ)
-        cdf(Normal(μ, exp(log_σ)), 0) > (1 - CI_probability) / 2
-    end
-
-    function g(offset, m)
-        function h(i)
-            if f(m.θ[i], m.θ[1 + offset])
-                m.θ[i], m.θ[1 + offset] = 0, -1000
-            end
+            output_temp = s.layers[i].activation.(layer_weights_1 * output .+ biases_1)
+            output = output + (layer_weights_2 * output_temp .+ biases_2)
+            # don't need to change w_offset
         end
     end
-        
-    g(m.structure.n_total_params, m).(1:m.structure.n_total_params)
+    return output
 end
 
 end

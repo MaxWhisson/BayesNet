@@ -8,8 +8,10 @@ export  propagate_matrix_opp,
         to_lower_triangular,
         trace,
         set_sub_vector_expr,
-        init_L_diagonal_cov
+        init_L_diagonal_cov,
+        init_means
 
+import Flux.glorot_uniform
 using Zygote
 
 function propagate_matrix_opp(matrix1, matrix2, i, f)                                                                                                                                                                                                                                                 
@@ -92,6 +94,23 @@ end
 function trace(x)
     println(x)
     return x
+end
+
+function init_means(layers::Vector, input_n::Int)
+    means = Vector(undef, length(layers))
+    for i in 1:length(layers)
+        if i == 1
+            means[i] = glorot_uniform(input_n, layers[i].n)
+        else
+            means[i] = glorot_uniform(layers[i - 1].n, layers[i].n)
+        end
+    end
+    weights = foldl(
+        (acc, w) -> [acc;vec(reshape(w, length(w), 1))],
+        means,
+        init = []
+    )
+    [weights;zeros(sum((x -> x.n).(layers)))]
 end
 
 end

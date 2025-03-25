@@ -21,7 +21,7 @@ using ..HelperFunctions
 
 # constructor for Laplace models
 function BuildLaplaceModel(priorCreator::Function, log_likelihood::Function, 
-    n_inputs::Int, layers::Vector{Layer})
+    n_inputs::Int, layers::Vector)
 
     n_weights = n_inputs * layers[1].n +
         sum([layers[i].n * layers[i + 1].n for i in 1:length(layers) - 1])

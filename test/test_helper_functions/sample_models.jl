@@ -10,7 +10,7 @@ function generate_binary_clusters(c1::Vector{Float64}, c2::Vector{Float64})
     x1,x2 = MvNormal(c1, I), MvNormal(c2, I)
     X = [rand(x1, 100) rand(x2, 100)]
     y = [zeros(100); ones(100)]
-    return X, y .|> Bool
+    return X, y .|> Float64
 end
 
 function generate_regression_data()
@@ -44,9 +44,9 @@ function make_test_VI_model(D::Int, is_diagonal::Bool, n_out::Int; log_l = Bayes
         log_l, 
         D,
         [
-            BayesNet.Layer(10, leaky_relu), 
-            BayesNet.Layer(5, leaky_relu), 
-            BayesNet.Layer(n_out, logistic)
+            BayesNet.DenseLayer(10, leaky_relu), 
+            BayesNet.DenseLayer(5, leaky_relu), 
+            BayesNet.DenseLayer(n_out, logistic)
         ]
     )
 end
@@ -58,7 +58,7 @@ function make_test_VI_regression_model(D::Int, is_diagonal::Bool, n_out::Int)
     return f(
         BayesNet.regression_log_likelihood, 
         D,
-        [BayesNet.Layer(5, leaky_relu), BayesNet.Layer(n_out, x -> x)]
+        [BayesNet.DenseLayer(5, leaky_relu), BayesNet.DenseLayer(n_out, x -> x)]
     )
 end
 
@@ -68,8 +68,8 @@ function make_test_binary_MCMC(D)
         BayesNet.binary_log_likelihood,
         D,
         [
-            BayesNet.Layer(5, leaky_relu), 
-            BayesNet.Layer(1, logistic), 
+            BayesNet.DenseLayer(5, leaky_relu), 
+            BayesNet.DenseLayer(1, logistic), 
         ]
     )
 end
