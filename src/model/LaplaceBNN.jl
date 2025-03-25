@@ -28,6 +28,7 @@ function BuildLaplaceModel(priorCreator::Function, log_likelihood::Function,
     n_params = n_weights + sum(layers .|> (x -> x.n))
 
     return Models.LaplaceModel( 
+        Models.simple_apply_grad,
         Models.ModelStructure(layers, n_inputs, n_params),
         randn(n_params + HelperFunctions.triangular(n_params)),        # weights
         priorCreator(n_params),
@@ -38,10 +39,10 @@ end
 function create_MAP_loss_fn(
         ;log_density_fn::Tuple{Bool, Function} = (false,log_density),
         n_samples::Int = 10)
-    function MAP_loss_fn(m::Models.LaplaceModel, X::AbstractMatrix{Float64},
+    function MAP_loss_fn(ms::Vector{Models.LaplaceModel}, X::AbstractMatrix{Float64},
             y::AbstractArray, args::Training.TrainingParameters, i::Int, 
             M::Int)
-        
+        m = ms[1]
         if !log_density_fn[1]
             return -log_density_fn[2](m, m.θ[1:m.structure.n_total_params], X, y, coef = 1/M)
         end
@@ -90,7 +91,7 @@ function fit_gaussian!(m::Models.LaplaceModel, X::AbstractMatrix{Float64},
         train_params
     )
     # learn first portion of m.θ (MAP)
-    Training.train!(m, X, y, args)
+    Training.train!([m], X, y, args)
     create_fit_covariance(log_density_fn = custom_log_density)(m, X, y)
 end
 

@@ -10,7 +10,8 @@ export  Model,
         VariationalModel,
         LaplaceModel,
         MCMC_Model,
-        DegenerateModel
+        DegenerateModel,
+        MultiModel
 
 # function exports
 export  diagonal_gaussian_prior_creator,
@@ -23,7 +24,9 @@ export  diagonal_gaussian_prior_creator,
         regression_log_likelihood,
         log_density,
         pred,
-        produce_degenerate
+        produce_degenerate,
+        simple_apply_grad,
+        produceMultiModel
 
 using Statistics
 using LinearAlgebra
@@ -77,13 +80,14 @@ end
 
 # struct for creating variational models.
 mutable struct VariationalModel <: Model
+    apply_grad::Function
     structure::ModelStructure
     θ::Vector{Float64}
     weight_sampler::Function
     log_prior::ParameterisedFunction
     log_likelihood::Function
-    log_posterior::Function
 
+    log_posterior::Function
     normalising_flow::Vector{NormalisingFlowLayer}
     n_variational_params::Int
     n_flow_params::Int
@@ -91,6 +95,7 @@ end
 
 # struct for creating Laplace models.
 mutable struct LaplaceModel <: Model
+    apply_grad::Function
     structure::ModelStructure
     θ::Vector{Float64}                  # w_MAP then log L
     log_prior::ParameterisedFunction    # log prior on weights
@@ -104,6 +109,7 @@ mutable struct MCMC_Model <: Model
 end
 
 mutable struct DegenerateModel <: Model
+    apply_grad::Function
     structure::ModelStructure
     θ::Vector{Float64}
 end
@@ -112,11 +118,25 @@ end
 ####                            Functions                             ####
 ##########################################################################
 
+function simple_apply_grad(m::Models.Model, g)
+    m.θ = m.θ .- g
+end
+
+function produceMultiModel(ms::Vector{Model}, apply_grad_fn::Function)
+    θ = reduce(vcat, (m -> m.θ).(ms))
+    MultiModel(
+        apply_grad_fn,
+        θ,
+        ms
+    )
+end
+
 function produce_degenerate(layers::Vector, n_inputs::Int)
     n_weights = n_inputs * layers[1].n +
         sum([layers[i].n * layers[i + 1].n for i in 1:length(layers) - 1])
     n_params = n_weights + sum(layers .|> (x -> x.n))
     DegenerateModel(
+        simple_apply_grad,
         ModelStructure(layers, n_inputs, n_params),
         randn(n_params)
     )

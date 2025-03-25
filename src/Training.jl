@@ -31,40 +31,50 @@ struct TrainArgs
     training_params::TrainingParameters
 end
 
-function update_parameters!(m, X_batch, y_batch, args, i, M, optimiser_state)
+function update_parameters!(ms::Vector, X_batch, y_batch, args, 
+        i, M, optimiser_state)
     # calculate gradients for mini-batch:
-    ∇θ = gradient(
-        () -> args.loss_fn(m, X_batch, y_batch, args.training_params, i, M),
-        Params([m.θ])
-    )[m.θ]
+    ∇θs = gradient(
+        () -> args.loss_fn(ms, X_batch, y_batch, args.training_params, i, M),
+        Params((m -> m.θ).(ms))
+    )
 
     # optionally calculate gradients for prior of model
     if (args.training_params.prior_optimisation_strategy == PARALLEL)
-        ∇θ_prior = gradient(
-            () -> args.loss_fn(m, X_batch, y_batch, args.training_params, i, M),
-            Params([m.log_prior.θ])
-        )[m.log_prior.θ]
-        (prior_optimiser_state, Δθ_prior) = Optimisers.apply!(
-            m.log_prior.optimiser_rule, 
-            m.log_prior.optimiser_state, 
-            m.log_prior.θ, 
-            ∇θ_prior
+        ∇θs_prior = gradient(
+            () -> args.loss_fn(ms, X_batch, y_batch, args.training_params, i, M),
+            Params((m -> m.log_prior.θ).(ms))
         )
+        for m_i in 1:length(m)
+            (ms[m_i].log_prior.optimiser_state, Δθ_prior) = Optimisers.apply!(
+                ms[m_i].log_prior.optimiser_rule, 
+                ms[m_i].log_prior.optimiser_state, 
+                ms[m_i].log_prior.θ, 
+                ∇θs_prior[ms[m_i].log_prior.θ]
+            )
+            ms[m_i].log_prior.θ = ms[m_i].log_prior.θ .- Δθ_prior
+        end
     end
 
     # and update with optimiser:
-    (optimiser_state, Δθ) = 
-        Optimisers.apply!(args.training_params.optimiser_rule, optimiser_state, m.θ, ∇θ)
-    m.θ = m.θ .- Δθ
+    for m_i in 1:length(ms)
+        (optimiser_state[m_i], Δθ) = Optimisers.apply!(
+            args.training_params.optimiser_rule, 
+            optimiser_state[m_i], 
+            ms[m_i].θ, 
+            ∇θs[ms[m_i].θ]
+        )
+        ms[m_i].apply_grad(ms[m_i], Δθ)
+    end
     return optimiser_state
 end
 
 # train model 'm' on data 'X' and 'y'
-function train!(m::Models.Model, X::Matrix{Float64}, y::AbstractArray, args::TrainArgs)
+function train!(ms::Vector, X::Matrix{Float64}, y::AbstractArray, args::TrainArgs)
     # for replicating results
     args.training_params.random_seed != -1 && Random.seed!(args.training_params.random_seed)
 
-    optimiser_state = Optimisers.init(args.training_params.optimiser_rule, m.θ)
+    optimiser_state = [Optimisers.init(args.training_params.optimiser_rule, m.θ) for m in ms]
     no_batches = Int64(floor(length(y) / args.training_params.batch_size))
     allLosses = Vector(undef, args.training_params.max_epoch)
     losses = Vector(undef, no_batches)
@@ -80,11 +90,11 @@ function train!(m::Models.Model, X::Matrix{Float64}, y::AbstractArray, args::Tra
             X_batch = X[:, start_index:end_index]
             y_batch = y[start_index:end_index]
 
-            optimiser_state = update_parameters!(m, X_batch, y_batch, args, batch_i + 1, no_batches, optimiser_state)
-            losses[batch_i + 1] = args.loss_fn(m, X_batch, y_batch, args.training_params, batch_i + 1, no_batches)
+            optimiser_state = update_parameters!(ms, X_batch, y_batch, args, batch_i + 1, no_batches, optimiser_state)
+            losses[batch_i + 1] = args.loss_fn(ms, X_batch, y_batch, args.training_params, batch_i + 1, no_batches)
         end
         allLosses[epoch] = sum(losses) 
-        if (epoch % 20 == 0) && (length(losses) > 0)
+        if (epoch % 1 == 0) && (length(losses) > 0)
             @info "Mean loss of epoch $(epoch): $(mean(losses))"
         end
     end

@@ -45,6 +45,7 @@ function VariationalUnitGaussianModel(log_likelihood::Function,
         sum((x -> x.n_params).(instantiated_flow)) : 0
 
     return VariationalModel(
+        Models.simple_apply_grad,
         ModelStructure(layers, n_inputs, n_params),
         randn(n_flow_params),
         Samplers.unit_gaussian_sampler,
@@ -82,6 +83,7 @@ function VariationalGaussianModel(prior_creator::Function,
 
     (n_variational_params, init_vals) = init_param_fn(n_params, n_flow_params)
     return VariationalModel(
+        Models.simple_apply_grad,
         ModelStructure(layers, n_inputs, n_params),
         init_vals,
         sampler,
@@ -287,9 +289,10 @@ end
 function variational_free_energy_creator(is_closed_form_gaussian::Bool, 
         coef_func::Function; 
         custom_log_density::Tuple{Bool, Function} = (false, x->x))
-    function f(m::Models.Model, X::AbstractMatrix{Float64}, 
+    function f(ms::Vector, X::AbstractMatrix{Float64}, 
             y::AbstractArray, args::Training.TrainingParameters, 
             i::Int, M::Int)
+        m = ms[1]
         coef_reweighting = coef_func(M, i)
 
         # samples from approximate posterior
@@ -340,22 +343,31 @@ function Langevin_Stein_objective(f::Models.DegenerateModel, m::Models.Model,
     end
 end
 
-# VI Operator Objective
-function create_variational_operator
-function variational_operator_objective(m::Models.model, 
-        f::Models.DegenerateModel, X::AbstractMatrix{Float64}, 
-        y::AbstractArray, operator::function, 
-        args::Training.TrainingParameters, i::Int, M::Int; 
-        t::Function=(x -> x^2), coef_func::Function=uniform_complexity_cost)
-    
-    W = m.weight_sampler(
-        variational_params, 
-        args.n_samples, 
-        m.structure.n_total_params
-    )
+function Langevin_Stein_apply_gradient(ms::Vector, g)
+    # TODO
+end
 
-    operator_objective = operator(f, m, i, M, coef_func)
-    mean((w -> operator_objective(X, w, y)).(eachcol(W))) |> t
+# VI Operator Objective
+function create_variational_operator(operator::Function; 
+        t::Function=(x -> x^2), coef_func::Function=uniform_complexity_cost)
+    function variational_operator_objective(ms::Vector,
+            X::AbstractMatrix{Float64}, y::AbstractArray, 
+            args::Training.TrainingParameters, i::Int, M::Int)
+
+        m = ms.ms[1]
+        f = ms.ms[2]
+        m.θ = ms.θ[1:m.n_variational_params + m.n_flow_params]
+        f.θ = ms.θ[m.n_variational_params + m.n_flow_params:end]
+        
+        W = m.weight_sampler(
+            variational_params, 
+            args.n_samples, 
+            m.structure.n_total_params
+        )
+
+        operator_objective = operator(f, m, i, M, coef_func)
+        mean((w -> operator_objective(X, w, y)).(eachcol(W))) |> t
+    end
 end
 
 function sample_model(m::Models.Model, n_samples::Integer)
@@ -447,7 +459,7 @@ function active_learning!(m::Models.VariationalModel,
         i = i + 1
 
         if retrains
-            Training.train!(m, X, y, args)
+            Training.train!([m], X, y, args)
         else
             update_online_diagonal_gaussian_posterior!(m, n_active_samples,
                 Ux_max, [Uy_max])
