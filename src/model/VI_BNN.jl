@@ -18,7 +18,11 @@ export  VariationalFullGaussianModel,
         transform_sample,
         sum_log_jacobian,
         predict_VI,
-        active_learning!
+        active_learning!,
+        Langevin_Stein_apply_gradient,
+        create_variational_operator,
+        Langevin_Stein_objective,
+        KL_divergence_objective
 
 # dependencies:
 using LinearAlgebra
@@ -336,15 +340,12 @@ function Langevin_Stein_objective(f::Models.DegenerateModel, m::Models.Model,
         ∇w = gradient(Params([w])) do
             log_density(m, w, X, y, coef = coef_func(M, i))
         end[w]
-        ∇f = (gradient(Params([w])) do
-            pred(f.structure, w, X)
-        end[w]) |> sum
-        ∇w'pred(f.structure, w, X) + ∇f
-    end
-end
 
-function Langevin_Stein_apply_gradient(ms::Vector, g)
-    # TODO
+        z = reshape(w, length(w), 1)
+        ∇f = jacobian(r -> pred(f.structure, f.θ, r), z)[1] |> tr
+
+        (∇w' * pred(f.structure, f.θ, reshape(w, length(w), 1)))[1,1] + ∇f
+    end
 end
 
 # VI Operator Objective
@@ -354,20 +355,29 @@ function create_variational_operator(operator::Function;
             X::AbstractMatrix{Float64}, y::AbstractArray, 
             args::Training.TrainingParameters, i::Int, M::Int)
 
-        m = ms.ms[1]
-        f = ms.ms[2]
-        m.θ = ms.θ[1:m.n_variational_params + m.n_flow_params]
-        f.θ = ms.θ[m.n_variational_params + m.n_flow_params:end]
+        m = ms[1]
+        f = ms[2]
         
         W = m.weight_sampler(
-            variational_params, 
+            m.θ, 
             args.n_samples, 
             m.structure.n_total_params
         )
 
         operator_objective = operator(f, m, i, M, coef_func)
-        mean((w -> operator_objective(X, w, y)).(eachcol(W))) |> t
+        res = (w -> operator_objective(X, w, y)).(eachcol(W))
+        mean(res) |> t
     end
+end
+
+function Langevin_Stein_apply_gradient(ms::Vector, g)
+    m = ms[1]
+    f = ms[2]
+    mg = g[1:m.n_variational_params + m.n_flow_params]
+    fg = g[m.n_variational_params + m.n_flow_params + 1:end]
+
+    m.θ = m.θ .- mg
+    f.θ = f.θ .+ fg
 end
 
 function sample_model(m::Models.Model, n_samples::Integer)

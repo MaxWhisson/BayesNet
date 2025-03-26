@@ -10,8 +10,7 @@ export  Model,
         VariationalModel,
         LaplaceModel,
         MCMC_Model,
-        DegenerateModel,
-        MultiModel
+        DegenerateModel
 
 # function exports
 export  diagonal_gaussian_prior_creator,
@@ -122,15 +121,6 @@ function simple_apply_grad(m::Models.Model, g)
     m.θ = m.θ .- g
 end
 
-function produceMultiModel(ms::Vector{Model}, apply_grad_fn::Function)
-    θ = reduce(vcat, (m -> m.θ).(ms))
-    MultiModel(
-        apply_grad_fn,
-        θ,
-        ms
-    )
-end
-
 function produce_degenerate(layers::Vector, n_inputs::Int)
     n_weights = n_inputs * layers[1].n +
         sum([layers[i].n * layers[i + 1].n for i in 1:length(layers) - 1])
@@ -138,7 +128,7 @@ function produce_degenerate(layers::Vector, n_inputs::Int)
     DegenerateModel(
         simple_apply_grad,
         ModelStructure(layers, n_inputs, n_params),
-        randn(n_params)
+        init_means(layers, n_inputs)
     )
 end
 
