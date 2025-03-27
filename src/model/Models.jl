@@ -133,15 +133,19 @@ function produce_degenerate(layers::Vector, n_inputs::Int)
 end
 
 # function for creating diagonal gaussian parametrised priors
-function diagonal_gaussian_prior_creator(n_params::Int; weight = log(0.1)) 
-    θ = [zeros(n_params); weight]
+function diagonal_gaussian_prior_creator(n_params::Int; weight = log(0.1),
+        hyper_weight = 0.1) 
+    θ = [zeros(n_params); weight * ones(n_params)]
     rule = Optimisers.Adam(0.1)
     state = Optimisers.init(rule, θ)
     return ParameterisedFunction(
         rule,
         state,
         θ,
-        θ -> w -> -exp.(weight) * w'w
+        θ -> w -> -(w - θ[1:n_params])' * 
+            diagm(exp.(θ[n_params + 1:end])) * 
+            (w - θ[1:n_params]) + 
+            hyper_weight * θ[1:n_params]' * θ[1:n_params]
     )
 end
 
@@ -244,8 +248,10 @@ end
 function multi_class_log_likelihood(m::Model, w::AbstractArray{Float64}, 
         X::AbstractMatrix{Float64}, y::AbstractArray{Int})
     ŷ = pred(m.structure, w, X) # matrix of Float64, column samples
-    normalised_ŷ = mapslices(softmax, ŷ, dims=1)
-    return sum(HelperFunctions.s_log.(normalised_ŷ[y]))
+    apply_func = (ŷ_item, y_item) -> HelperFunctions.s_log(
+        exp((ŷ_item)[y_item]) / sum(exp.(ŷ_item))
+    )
+    return sum(apply_func.(eachcol(ŷ), y))
 end
 
 # log likelihood for mono-target regression

@@ -320,6 +320,10 @@ function variational_free_energy_creator(is_closed_form_gaussian::Bool,
                 coef = coef_reweighting)
         end
 
+        # println(coef_reweighting * (variational_expectation - flows_E))
+        # println(-log_joint_distribution)
+        # println()
+
         return coef_reweighting * (variational_expectation - flows_E) - 
             log_joint_distribution
     end

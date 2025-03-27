@@ -31,7 +31,7 @@ function plot_normalising_flow_vector_field!(
 end
 
 function accuracy(y, preds)
-    return 1 - mean(abs.(y' - round.(preds)))
+    return 1 - mean(((x1, x2) -> !(x1 ≈ x2)).(y, preds))
 end
 
 # remove proportion of highest variance weights' variational parameters 
