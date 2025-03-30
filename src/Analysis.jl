@@ -7,6 +7,7 @@ export  plot_normalising_flow_vector_field!,
 
 using Plots
 using Statistics
+using Distributions
 
 using ..Models
 using ..VI_BNN
@@ -35,10 +36,11 @@ function accuracy(y, preds)
 end
 
 # remove proportion of highest variance weights' variational parameters 
-function prune_diagonal_gaussian_proportion!(m; proportion = 0.9)
+function prune_diagonal_gaussian_proportion!(m; proportion = 0.5)
     θ = m.θ[1:m.n_variational_params]
     log_σ = θ[m.structure.n_total_params + 1:end]
-    sorted = zip(log_σ, 1:m.structure.n_total_params) |> collect |> sort
+    sorted = zip(log_σ, 1:m.structure.n_total_params) |> 
+        collect |> sort |> reverse
     # zero everything below this
     cutoff_i = ceil(proportion * m.structure.n_total_params)
 
@@ -52,7 +54,7 @@ end
 # from 0
 function prune_diagonal_gaussian_CI!(m; CI_probability = 0.9)
     function f(μ, log_σ)
-        cdf(Normal(μ, exp(log_σ)), 0) > (1 - CI_probability) / 2
+        cdf(Normal(μ, exp(log_σ)), 0) > 1 - CI_probability / 2
     end
 
     function g(offset, m)

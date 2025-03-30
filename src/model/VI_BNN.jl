@@ -4,6 +4,7 @@ module VI_BNN
 export  VariationalFullGaussianModel,
         VariationalDiagonalGaussianModel,
         VariationalUnitGaussianModel,
+        VariationalGaussianModel,
         log_diagonal_gaussian_posterior,
         log_full_gaussian_posterior,
         log_unit_gaussian_posterior,
@@ -300,8 +301,8 @@ end
 
 # VI training function to optimise
 function variational_free_energy_creator(is_closed_form_gaussian::Bool, 
-        coef_func::Function; λ::Float64 = 1.0,
-        α₀::Float64 = 6.0, β₀::Float64 = 6.0, is_adaptive_regression::Bool = false,
+        coef_func::Function; λ::Float64 = 1.0, λγ::Float64 = 100.0,
+        α₀::Float64 = 12.0, β₀::Float64 = 0.1, is_adaptive_regression::Bool = false,
         custom_log_density::Tuple{Bool, Function} = (false, x->x))
     function f(ms::Vector, X::AbstractMatrix{Float64}, 
             y::AbstractArray, args::Training.TrainingParameters, 
@@ -314,20 +315,24 @@ function variational_free_energy_creator(is_closed_form_gaussian::Bool,
 
         # adaptive regression case
         if is_adaptive_regression
-            τ = m.θ[end]
-            α = m.θ[end - 1]
-            β = m.θ[end - 2]
+            τ = exp(m.θ[end])
+            α = exp(m.θ[end - 2])
+            β = exp(m.θ[end - 1])
 
             # likelihood
             function sample_evaluation(m, sample, X, y)
-                ŷ = Models.pred(m.structure, sample, X)
+                ŷ = Models.pred(m.structure, sample, X)'
                 digamma(α^τ) - log(β^τ) - ((α^τ) / (β^τ)) * 
                     sum((y - ŷ) .^ 2) - log(2π)
             end
             m.log_likelihood = sample_evaluation
 
-            retVal -= α * log(β/β₀) - log(gamma(α)/gamma(α₀)) +
-                (α - α₀) * digamma(α) - (β - β₀) * (α/β)
+            α₁, β₁ = α^τ, β^τ
+            α₂, β₂ = α₀, β₀
+
+            retVal += (α₁ * log(β₁/β₂) - (loggamma(α₁) - loggamma(α₂)) +
+                (α₁ - α₂) * digamma(α₁) - (β₁ - β₂) * (α₁/β₁)) * λγ
+            # println("$(τ), $(α^τ / β^τ), $(α^τ), $(β^τ), $(α₀), $(β₀) $(retVal)")
         end
 
         w₀ = m.weight_sampler(
@@ -354,6 +359,7 @@ function variational_free_energy_creator(is_closed_form_gaussian::Bool,
         # # for debugging
         # println(coef_reweighting * (variational_expectation - flows_E))
         # println(-log_joint_distribution)
+        # println(retVal)
         # println()
 
         return coef_reweighting * (variational_expectation - flows_E) - 

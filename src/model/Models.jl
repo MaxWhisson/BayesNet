@@ -253,12 +253,12 @@ end
 # log likelihood for mono-target regression
 function regression_log_likelihood(m::Model, w::AbstractArray, 
         X::AbstractMatrix{Float64}, y::AbstractArray{Float64}; 
-        τ::Float64 = 1/0.01)
+        τ::Float64 = 100.0)
     ŷ = pred(m.structure, w, X)'[:,1]
     N = length(y)
     error_diff = ŷ - y
 
-    return -(1/τ) * (error_diff' * error_diff)
+    return -τ * (error_diff' * error_diff)
 end
 
 # log P(D|w)P(w)
