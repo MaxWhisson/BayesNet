@@ -30,6 +30,7 @@ using Distributions
 using Optimisers
 using Random
 using Zygote
+using SpecialFunctions
 
 using ..Samplers
 using ..Models
@@ -115,7 +116,7 @@ function VariationalFullGaussianModel(log_likelihood::Function, n_inputs::Int,
         end
 
         layer_means_init = HelperFunctions.init_means(layers, n_inputs)
-        normalising_init = randn(n_f) # TODO
+        normalising_init = randn(n_f)
 
         n + HelperFunctions.triangular(n), [layer_means_init;init_L;normalising_init]
     end
@@ -139,7 +140,7 @@ function VariationalDiagonalGaussianModel(log_likelihood::Function,
     function init_param_fn_diag(n, n_f)
         init_log_σ = ones(n) * -5
         layer_means_init = HelperFunctions.init_means(layers, n_inputs)
-        normalising_init = randn(n_f) # TODO
+        normalising_init = randn(n_f)
 
         2 * n, [layer_means_init;init_log_σ;normalising_init]
     end
@@ -161,9 +162,17 @@ function log_diagonal_gaussian_posterior(m::Models.Model,
     variational_params = m.θ[1:m.n_variational_params]
     n_params = m.structure.n_total_params
 
+    ma = diagm(exp.(variational_params[n_params + 1:end]) .^ 2)
+    if !issymmetric(ma) || !isposdef(ma)
+        display(exp.(variational_params[n_params + 1:end]) .^ 2)
+    end
+
+    # might need to report zeros?
+    Σ_diag = exp.(variational_params[n_params + 1:end]) .^ 2
+
     log_posterior_pdf = sample -> logpdf(MvNormal(
         variational_params[1:n_params], 
-        Diagonal(log.(1 .+ exp.(variational_params[n_params + 1:end])) .^ 2)
+        diagm(Σ_diag)
     ), sample)
     return log_posterior_pdf.(eachcol(samples))
 end
@@ -174,7 +183,7 @@ function log_full_gaussian_posterior(m::Models.Model,
     variational_params = m.θ[1:m.n_variational_params]
     n_params = m.structure.n_total_params
     L = HelperFunctions.to_lower_triangular(
-        log.(1 .+ exp.(variational_params[n_params + 1:end])), n_params
+        exp.(variational_params[n_params + 1:end]), n_params
     )
 
     log_posterior_pdf = sample -> logpdf(MvNormal(
@@ -291,16 +300,35 @@ end
 
 # VI training function to optimise
 function variational_free_energy_creator(is_closed_form_gaussian::Bool, 
-        coef_func::Function; 
+        coef_func::Function; λ::Float64 = 1.0,
+        α₀::Float64 = 6.0, β₀::Float64 = 6.0, is_adaptive_regression::Bool = false,
         custom_log_density::Tuple{Bool, Function} = (false, x->x))
     function f(ms::Vector, X::AbstractMatrix{Float64}, 
             y::AbstractArray, args::Training.TrainingParameters, 
             i::Int, M::Int)
         m = ms[1]
-        coef_reweighting = coef_func(M, i)
-
-        # samples from approximate posterior
+        coef_reweighting = λ * coef_func(M, i)
         variational_params = m.θ[1:m.n_variational_params]
+
+        retVal = 0
+
+        # adaptive regression case
+        if is_adaptive_regression
+            τ = m.θ[end]
+            α = m.θ[end - 1]
+            β = m.θ[end - 2]
+
+            # likelihood
+            function sample_evaluation(m, sample, X, y)
+                ŷ = Models.pred(m.structure, sample, X)
+                digamma(α^τ) - log(β^τ) - ((α^τ) / (β^τ)) * 
+                    sum((y - ŷ) .^ 2) - log(2π)
+            end
+            m.log_likelihood = sample_evaluation
+
+            retVal -= α * log(β/β₀) - log(gamma(α)/gamma(α₀)) +
+                (α - α₀) * digamma(α) - (β - β₀) * (α/β)
+        end
 
         w₀ = m.weight_sampler(
             variational_params, 
@@ -308,24 +336,28 @@ function variational_free_energy_creator(is_closed_form_gaussian::Bool,
             m.structure.n_total_params
         )
 
-        # normalising flow then E_Q[Q()]
+        # normalising flow then E_Q[Q(w)]
         (samples, flows_E) = evaluate_normalising_flow(m, w₀)
         variational_expectation = evaluate_variational_posterior_expectation(
             m, is_closed_form_gaussian, w₀)
 
+        # evaluate log joint density log(p(D,w))
         if (custom_log_density[1])
-            log_joint_distribution = mean(custom_log_density[2](samples))
+            log_joint_density = custom_log_density[2]
         else
-            log_joint_distribution = log_density(m, samples, X, y, 
-                coef = coef_reweighting)
+            log_joint_density = log_density
         end
 
+        log_joint_distribution = log_joint_density(m, samples, X, y, 
+            coef = coef_reweighting)
+
+        # # for debugging
         # println(coef_reweighting * (variational_expectation - flows_E))
         # println(-log_joint_distribution)
         # println()
 
         return coef_reweighting * (variational_expectation - flows_E) - 
-            log_joint_distribution
+            log_joint_distribution + retVal
     end
 end
 

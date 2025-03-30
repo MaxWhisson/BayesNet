@@ -62,8 +62,8 @@ end
 # struct for parameterised priors
 # * function is θ -> x -> Type parameterised over θ
 mutable struct ParameterisedFunction
-    optimiser_state
     optimiser_rule
+    optimiser_state
     θ::Vector{Float64}
     func::Function
 end
@@ -134,18 +134,17 @@ end
 
 # function for creating diagonal gaussian parametrised priors
 function diagonal_gaussian_prior_creator(n_params::Int; weight = log(0.1),
-        hyper_weight = 0.1) 
+        hyper_weight = 0.1, rule = Optimisers.Adam(0.01)) 
     θ = [zeros(n_params); weight * ones(n_params)]
-    rule = Optimisers.Adam(0.1)
     state = Optimisers.init(rule, θ)
     return ParameterisedFunction(
         rule,
         state,
         θ,
-        θ -> w -> -(w - θ[1:n_params])' * 
+        θ -> w -> -((w - θ[1:n_params])' * 
             diagm(exp.(θ[n_params + 1:end])) * 
-            (w - θ[1:n_params]) + 
-            hyper_weight * θ[1:n_params]' * θ[1:n_params]
+            (w - θ[1:n_params]) +
+            hyper_weight * θ[1:n_params]' * θ[1:n_params])
     )
 end
 
@@ -230,10 +229,10 @@ function inverse_flow(zₙ::AbstractArray{Float64},
     )[1]
 end
 
-function softmax(z::AbstractArray{Float64})
-    z .-= maximum(z)
-    z′ = exp.(z)
-    return z′./ sum(z′)
+function log_softmax(ŷ_item, y_item)
+    max_val = maximum(ŷ_item)
+    ((ŷ_item)[y_item] - max_val) - 
+        log(sum(exp.(ŷ_item .- max_val)))
 end
 
 # log likelihood for binary classification
@@ -248,24 +247,18 @@ end
 function multi_class_log_likelihood(m::Model, w::AbstractArray{Float64}, 
         X::AbstractMatrix{Float64}, y::AbstractArray{Int})
     ŷ = pred(m.structure, w, X) # matrix of Float64, column samples
-    apply_func = (ŷ_item, y_item) -> HelperFunctions.s_log(
-        exp((ŷ_item)[y_item]) / sum(exp.(ŷ_item))
-    )
-    return sum(apply_func.(eachcol(ŷ), y))
+    return sum(log_softmax.(eachcol(ŷ), y))
 end
 
 # log likelihood for mono-target regression
 function regression_log_likelihood(m::Model, w::AbstractArray, 
-        X::AbstractMatrix{Float64}, y::AbstractArray{Float64})
+        X::AbstractMatrix{Float64}, y::AbstractArray{Float64}; 
+        τ::Float64 = 1/0.01)
     ŷ = pred(m.structure, w, X)'[:,1]
     N = length(y)
     error_diff = ŷ - y
 
-    # TODO
-    # σ2 = (1/N) * (error_diff' * error_diff)
-    σ2 = 0.01
-
-    return -(1/(2 *σ2)) * (error_diff' * error_diff)
+    return -(1/τ) * (error_diff' * error_diff)
 end
 
 # log P(D|w)P(w)
@@ -273,8 +266,6 @@ function log_density(m::Model, w::AbstractArray,
         X::AbstractMatrix{Float64}, y::AbstractArray; coef = 1)
     mapped_log_likelihood = (m, X, y) -> (w -> m.log_likelihood(m, w, X, y))
     log_prior = m.log_prior.func(m.log_prior.θ)
-
-    # println("$(mean(log_prior.(eachcol(w)))), $(mean(mapped_log_likelihood(m, X, y).(eachcol(w))))\n")
 
     return coef * mean(log_prior.(eachcol(w))) + 
         mean(mapped_log_likelihood(m, X, y).(eachcol(w)))

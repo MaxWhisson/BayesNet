@@ -2,8 +2,7 @@ module Training
 
 # type exports
 export  TrainingParameters,
-        TrainArgs,
-        PRIOR_OPTIMISATION
+        TrainArgs
 
 # function exports
 export  train!
@@ -12,18 +11,19 @@ using Optimisers
 using Random
 using Zygote
 using Statistics
+using LinearAlgebra
+using Distributions
 
 import ..Models
-
-@enum PRIOR_OPTIMISATION NONE=1 PARALLEL=2 BLOCK=3
 
 Base.@kwdef struct TrainingParameters
     n_samples = 10
     max_epoch = 200
     batch_size = 20
     optimiser_rule = Optimisers.Adam(0.1) 
-    prior_optimisation_strategy = NONE
+    prior_optimisation_strategy = "none"
     random_seed = -1
+    is_natural = "none"
 end
 
 struct TrainArgs
@@ -31,21 +31,26 @@ struct TrainArgs
     training_params::TrainingParameters
 end
 
+function compute_Fisher_diagonal(m;n_samples = 20)
+    n_params = m.structure.n_total_params
+    diag_mus = exp.(m.θ[n_params + 1:end]) .^ -2
+    diag_sigmas = ones(n_params) .* 2
+    # return diagm([diag_mus;diag_sigmas])
+    return diagm(ones(n_params * 2))
+end
+
 function update_parameters!(ms::Vector, X_batch, y_batch, args, 
         i, M, optimiser_state)
-    # calculate gradients for mini-batch:
-    ∇θs = gradient(
-        () -> args.loss_fn(ms, X_batch, y_batch, args.training_params, i, M),
-        Params((m -> m.θ).(ms))
-    )
+
+    uses_natural_gd = args.training_params.is_natural
 
     # optionally calculate gradients for prior of model
-    if (args.training_params.prior_optimisation_strategy == PARALLEL)
+    if (args.training_params.prior_optimisation_strategy == "parallel")
         ∇θs_prior = gradient(
             () -> args.loss_fn(ms, X_batch, y_batch, args.training_params, i, M),
             Params((m -> m.log_prior.θ).(ms))
         )
-        for m_i in 1:length(m)
+        for m_i in 1:length(ms)
             (ms[m_i].log_prior.optimiser_state, Δθ_prior) = Optimisers.apply!(
                 ms[m_i].log_prior.optimiser_rule, 
                 ms[m_i].log_prior.optimiser_state, 
@@ -56,8 +61,18 @@ function update_parameters!(ms::Vector, X_batch, y_batch, args,
         end
     end
 
+    # calculate gradients for mini-batch:
+    ∇θs = gradient(
+        () -> args.loss_fn(ms, X_batch, y_batch, args.training_params, i, M),
+        Params((m -> m.θ).(ms))
+    )
+
     # and update with optimiser:
     for m_i in 1:length(ms)
+        if uses_natural_gd == "diagonal"
+            println("a")
+            ∇θs[ms[m_i].θ] = (compute_Fisher_diagonal(ms[m_i]) \ ∇θs[ms[m_i].θ])
+        end
         (optimiser_state[m_i], Δθ) = Optimisers.apply!(
             args.training_params.optimiser_rule, 
             optimiser_state[m_i], 
@@ -66,6 +81,7 @@ function update_parameters!(ms::Vector, X_batch, y_batch, args,
         )
         ms[m_i].apply_grad(ms[m_i], Δθ)
     end
+
     return optimiser_state
 end
 
