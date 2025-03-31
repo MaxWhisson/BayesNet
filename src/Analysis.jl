@@ -38,16 +38,20 @@ end
 # remove proportion of highest variance weights' variational parameters 
 function prune_diagonal_gaussian_proportion!(m; proportion = 0.5)
     θ = m.θ[1:m.n_variational_params]
+    μ = θ[1:m.structure.n_total_params]
     log_σ = θ[m.structure.n_total_params + 1:end]
-    sorted = zip(log_σ, 1:m.structure.n_total_params) |> 
-        collect |> sort |> reverse
+
+    sorted = zip(
+        abs.(μ) ./ exp.(log_σ), 
+        1:m.structure.n_total_params
+    ) |> collect |> sort
     # zero everything below this
     cutoff_i = ceil(proportion * m.structure.n_total_params)
 
     # indexes of params to be zeroed
     to_zero = (x -> x[2]).(sorted)[1:Int(cutoff_i)]
     m.θ[to_zero] .= 0 
-    m.θ[to_zero .+ m.structure.n_total_params] .= -1000
+    m.θ[to_zero .+ m.structure.n_total_params] .= -Inf
 end
 
 # remove parameters for weights that are not significantly different
@@ -60,7 +64,7 @@ function prune_diagonal_gaussian_CI!(m; CI_probability = 0.9)
     function g(offset, m)
         function h(i)
             if f(m.θ[i], m.θ[1 + offset])
-                m.θ[i], m.θ[1 + offset] = 0, -1000
+                m.θ[i], m.θ[1 + offset] = 0, -Inf
             end
         end
     end

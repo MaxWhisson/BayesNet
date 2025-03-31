@@ -116,7 +116,7 @@ function VariationalFullGaussianModel(log_likelihood::Function, n_inputs::Int,
             init_L[t] = -5
         end
 
-        layer_means_init = HelperFunctions.init_means(layers, n_inputs)
+        layer_means_init = Models.init_means(layers, n_inputs)
         normalising_init = randn(n_f)
 
         n + HelperFunctions.triangular(n), [layer_means_init;init_L;normalising_init]
@@ -140,7 +140,7 @@ function VariationalDiagonalGaussianModel(log_likelihood::Function,
 
     function init_param_fn_diag(n, n_f)
         init_log_σ = ones(n) * -5
-        layer_means_init = HelperFunctions.init_means(layers, n_inputs)
+        layer_means_init = Models.init_means(layers, n_inputs)
         normalising_init = randn(n_f)
 
         2 * n, [layer_means_init;init_log_σ;normalising_init]
@@ -159,7 +159,7 @@ end
 
 # evaluate log density of samples on diagonal gaussian
 function log_diagonal_gaussian_posterior(m::Models.Model, 
-        samples::AbstractMatrix{Float64})
+        samples::AbstractArray{Float64})
     variational_params = m.θ[1:m.n_variational_params]
     n_params = m.structure.n_total_params
 
@@ -180,7 +180,7 @@ end
 
 # evaluate log density of samples on full gaussian
 function log_full_gaussian_posterior(m::Models.Model, 
-        samples::AbstractMatrix{Float64})
+        samples::AbstractArray{Float64})
     variational_params = m.θ[1:m.n_variational_params]
     n_params = m.structure.n_total_params
     L = HelperFunctions.to_lower_triangular(
@@ -332,7 +332,6 @@ function variational_free_energy_creator(is_closed_form_gaussian::Bool,
 
             retVal += (α₁ * log(β₁/β₂) - (loggamma(α₁) - loggamma(α₂)) +
                 (α₁ - α₂) * digamma(α₁) - (β₁ - β₂) * (α₁/β₁)) * λγ
-            # println("$(τ), $(α^τ / β^τ), $(α^τ), $(β^τ), $(α₀), $(β₀) $(retVal)")
         end
 
         w₀ = m.weight_sampler(
@@ -357,6 +356,7 @@ function variational_free_energy_creator(is_closed_form_gaussian::Bool,
             coef = coef_reweighting)
 
         # # for debugging
+        # println("$(τ), $(α^τ / β^τ), $(α^τ), $(β^τ), $(α₀), $(β₀) $(retVal)")
         # println(coef_reweighting * (variational_expectation - flows_E))
         # println(-log_joint_distribution)
         # println(retVal)
@@ -372,7 +372,7 @@ function KL_divergence_objective(f::Models.DegenerateModel, m::Models.Model,
         i::Int, M::Int, coef_func::Function)
     function g(X::AbstractMatrix{Float64}, w::AbstractArray, y::AbstractArray)
         coef = coef_func(M, i)
-        coef * m.log_posterior(m, w) - log_density(m, w, X, y, coef = coef)
+        coef * mean(m.log_posterior(m, w)) - log_density(m, w, X, y, coef = coef)
     end
 end
 

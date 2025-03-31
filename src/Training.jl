@@ -55,7 +55,7 @@ function update_parameters!(ms::Vector, X_batch, y_batch, args,
                 ms[m_i].log_prior.optimiser_rule, 
                 ms[m_i].log_prior.optimiser_state, 
                 ms[m_i].log_prior.θ, 
-                ∇θs_prior[ms[m_i].log_prior.θ]
+                clean_grad.(∇θs_prior[ms[m_i].log_prior.θ])
             )
             ms[m_i].log_prior.θ = ms[m_i].log_prior.θ .- Δθ_prior
         end
@@ -77,12 +77,16 @@ function update_parameters!(ms::Vector, X_batch, y_batch, args,
             args.training_params.optimiser_rule, 
             optimiser_state[m_i], 
             ms[m_i].θ, 
-            ∇θs[ms[m_i].θ]
+            clean_grad.(∇θs[ms[m_i].θ])
         )
         ms[m_i].apply_grad(ms[m_i], Δθ)
     end
 
     return optimiser_state
+end
+
+function clean_grad(g)
+    g == nothing ? 0.0 : g
 end
 
 # train model 'm' on data 'X' and 'y'

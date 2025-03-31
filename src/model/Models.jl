@@ -25,7 +25,8 @@ export  diagonal_gaussian_prior_creator,
         pred,
         produce_degenerate,
         simple_apply_grad,
-        produceMultiModel
+        produceMultiModel,
+        init_means
 
 using Statistics
 using LinearAlgebra
@@ -34,6 +35,7 @@ using Distributions
 using LogExpFunctions
 using ..HelperFunctions
 using Optimisers
+import Flux.glorot_uniform
 
 abstract type Layer end
 
@@ -314,6 +316,36 @@ function pred(s::ModelStructure, weights::AbstractArray,
         end
     end
     return output
+end
+
+function init_means(layers::Vector, input_n::Int)
+    means = Vector(undef, length(layers))
+    j = 0
+    for i in 1:length(layers)
+        if typeof(layers[i]) == DenseLayer
+            j += 1
+            if i == 1
+                means[j] = glorot_uniform(input_n, layers[i].n)
+            else
+                means[j] = glorot_uniform(layers[i - 1].n, layers[i].n)
+            end
+        elseif typeof(layers[i]) == ResidualLayer
+            j += 1
+            if i == 1
+                means[j] = glorot_uniform(input_n, layers[i].n1)
+            else
+                means[j] = glorot_uniform(layers[i - 1].n2, layers[i].n1)
+            end
+            j += 1
+            means[j] = glorot_uniform(layers[i].n1, layers[i].n2)
+        end
+    end
+    weights = foldl(
+        (acc, w) -> [acc;vec(reshape(w, length(w), 1))],
+        means,
+        init = []
+    )
+    [weights;zeros(sum((x -> x.n).(layers)))]
 end
 
 end

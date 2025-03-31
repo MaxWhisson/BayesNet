@@ -59,20 +59,17 @@ function create_fit_covariance(
         n_samples::Int = 10)
     function fit_covariance!(m::Models.LaplaceModel, 
             X::AbstractMatrix{Float64}, y::AbstractArray)
-        H = hessian(
+        H_inv = hessian(
             θ -> !log_density_fn[1] ?
                     -log_density_fn[2](m, θ, X, y) : 
                     -log_density_fn[2](
                         rand(get_approximating_distribution(m), n_samples)
                     ),
             m.θ[1:m.structure.n_total_params]
-        )
-
-        H_inv = inv(H)
+        ) |> inv
         # println(minimum(diag(inv(H))))
 
-        lower_H = LowerTriangular(H_inv)
-        H_inv = zeros(size(H_inv)) + lower_H + lower_H' - diagm(diag(H_inv))
+        @assert issymmetric(H_inv) "Inverse Hessian isn't symmetric..."
         @assert isposdef(H_inv) "Inverse Hessian isn't positive definite..."
 
         L = HelperFunctions.flatten_triangular(
