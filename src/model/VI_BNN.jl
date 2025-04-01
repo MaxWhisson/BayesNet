@@ -315,19 +315,18 @@ function variational_free_energy_creator(is_closed_form_gaussian::Bool,
 
         # adaptive regression case
         if is_adaptive_regression
-            τ = exp(m.θ[end])
-            α = exp(m.θ[end - 2])
-            β = exp(m.θ[end - 1])
+            ατ = exp(m.θ[end - 1])
+            βτ = exp(m.θ[end])
 
             # likelihood
             function sample_evaluation(m, sample, X, y)
                 ŷ = Models.pred(m.structure, sample, X)'
-                digamma(α^τ) - log(β^τ) - ((α^τ) / (β^τ)) * 
+                digamma(ατ) - log(βτ) - ((ατ) / (βτ)) * 
                     sum((y - ŷ) .^ 2) - log(2π)
             end
             m.log_likelihood = sample_evaluation
 
-            α₁, β₁ = α^τ, β^τ
+            α₁, β₁ = ατ, βτ
             α₂, β₂ = α₀, β₀
 
             retVal += (α₁ * log(β₁/β₂) - (loggamma(α₁) - loggamma(α₂)) +

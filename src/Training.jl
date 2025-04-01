@@ -35,8 +35,24 @@ function compute_Fisher_diagonal(m;n_samples = 20)
     n_params = m.structure.n_total_params
     diag_mus = exp.(m.θ[n_params + 1:end]) .^ -2
     diag_sigmas = ones(n_params) .* 2
-    # return diagm([diag_mus;diag_sigmas])
-    return diagm(ones(n_params * 2))
+    return diagm([diag_mus;diag_sigmas])
+    # return diagm(ones(n_params * 2))
+end
+
+function update_prior_parameters!(ms::Vector, X_batch, y_batch, args, i, M)
+    ∇θs_prior = gradient(
+        () -> args.loss_fn(ms, X_batch, y_batch, args.training_params, i, M),
+        Params((m -> m.log_prior.θ).(ms))
+    )
+    for m_i in 1:length(ms)
+        (ms[m_i].log_prior.optimiser_state, Δθ_prior) = Optimisers.apply!(
+            ms[m_i].log_prior.optimiser_rule, 
+            ms[m_i].log_prior.optimiser_state, 
+            ms[m_i].log_prior.θ, 
+            clean_grad.(∇θs_prior[ms[m_i].log_prior.θ])
+        )
+        ms[m_i].log_prior.θ = ms[m_i].log_prior.θ .- Δθ_prior
+    end
 end
 
 function update_parameters!(ms::Vector, X_batch, y_batch, args, 
@@ -46,19 +62,7 @@ function update_parameters!(ms::Vector, X_batch, y_batch, args,
 
     # optionally calculate gradients for prior of model
     if (args.training_params.prior_optimisation_strategy == "parallel")
-        ∇θs_prior = gradient(
-            () -> args.loss_fn(ms, X_batch, y_batch, args.training_params, i, M),
-            Params((m -> m.log_prior.θ).(ms))
-        )
-        for m_i in 1:length(ms)
-            (ms[m_i].log_prior.optimiser_state, Δθ_prior) = Optimisers.apply!(
-                ms[m_i].log_prior.optimiser_rule, 
-                ms[m_i].log_prior.optimiser_state, 
-                ms[m_i].log_prior.θ, 
-                clean_grad.(∇θs_prior[ms[m_i].log_prior.θ])
-            )
-            ms[m_i].log_prior.θ = ms[m_i].log_prior.θ .- Δθ_prior
-        end
+        update_prior_parameters!(ms, X_batch, y_batch, args, i, M)
     end
 
     # calculate gradients for mini-batch:
@@ -70,7 +74,6 @@ function update_parameters!(ms::Vector, X_batch, y_batch, args,
     # and update with optimiser:
     for m_i in 1:length(ms)
         if uses_natural_gd == "diagonal"
-            println("a")
             ∇θs[ms[m_i].θ] = (compute_Fisher_diagonal(ms[m_i]) \ ∇θs[ms[m_i].θ])
         end
         (optimiser_state[m_i], Δθ) = Optimisers.apply!(
@@ -90,7 +93,8 @@ function clean_grad(g)
 end
 
 # train model 'm' on data 'X' and 'y'
-function train!(ms::Vector, X::Matrix{Float64}, y::AbstractArray, args::TrainArgs)
+function train!(ms::Vector, X::Matrix{Float64}, y::AbstractArray, args::TrainArgs;
+        prior_block = 100, prior_epochs = 10)
     # for replicating results
     args.training_params.random_seed != -1 && Random.seed!(args.training_params.random_seed)
 
@@ -103,6 +107,20 @@ function train!(ms::Vector, X::Matrix{Float64}, y::AbstractArray, args::TrainArg
     for epoch in 1:args.training_params.max_epoch
         indexes = shuffle(1:length(y))
         X, y = X[:,indexes], y[indexes]
+
+        if (args.training_params.prior_optimisation_strategy == "block") && (epoch % prior_block == 0)
+            for i in 1:prior_epochs
+                for batch_i in 0:no_batches - 1
+                    start_index = 1 + batch_i * args.training_params.batch_size
+                    end_index = (batch_i + 1) * args.training_params.batch_size
+
+                    X_batch = X[:, start_index:end_index]
+                    y_batch = y[start_index:end_index]
+                    update_prior_parameters!(ms, X_batch, y_batch, args, batch_i + 1, no_batches)
+                end
+            end
+        end
+
         for batch_i in 0:no_batches - 1
             start_index = 1 + batch_i * args.training_params.batch_size
             end_index = (batch_i + 1) * args.training_params.batch_size
