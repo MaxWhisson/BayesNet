@@ -5,7 +5,7 @@ include("../test_helper_functions/sample_models.jl")
 function test_adaptive_MCMC()
     m = make_test_binary_MCMC(2)
     X, y = generate_binary_clusters(float.([2,1]), float.([1,2]))
-    weight_samples = BayesNet.adaptive_MCMC_sampler(m, X, y, 100)
+    weight_samples = BayesNet.adaptive_MCMC_sampler(m, X, y, n_samples = 100)
     (size(weight_samples)[1] == 2 * 5 + 5 + 5 + 1) && (size(weight_samples)[2] == 100)
 end
 

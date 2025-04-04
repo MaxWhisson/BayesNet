@@ -56,7 +56,7 @@ function test_gaussian_entropy_1()
 end
 
 function test_gaussian_entropy_2()
-    return BayesNet.gaussian_entropy(float.(log.([ℯ,ℯ])), 4) ≈ 2 * (1 + log(2π) + 2)
+    return BayesNet.gaussian_entropy(float.(log.([ℯ,ℯ])), 4) ≈ 2 * (1 + log(2π)) + 2
 end
 
 function test_log_diagonal_gaussian_posterior_size_correct(D)
@@ -131,7 +131,7 @@ function test_variational_free_energy()
     m = make_test_VI_model(2, true, 1)
     X, y = generate_binary_clusters(float.([2,1]), float.([1,2]))
 
-    L = f(m, X, y, BayesNet.TrainingParameters(), 1, 1)
+    L = f([m], X, y, BayesNet.TrainingParameters(), 1, 1)
     typeof(L) == Float64
 end
 
@@ -140,8 +140,8 @@ function test_equivalent_posterior_densities(D)
         x -> x,
         D,
         [
-            # BayesNet.Layer(20, x -> x),
-            BayesNet.Layer(1, x -> x)
+            # BayesNet.DenseLayer(20, x -> x),
+            BayesNet.DenseLayer(1, x -> x)
         ]
     )
 
@@ -149,8 +149,8 @@ function test_equivalent_posterior_densities(D)
         x -> x,
         D,
         [
-            # BayesNet.Layer(20, x -> x),
-            BayesNet.Layer(1, x -> x)
+            # BayesNet.DenseLayer(20, x -> x),
+            BayesNet.DenseLayer(1, x -> x)
         ]
     )
 

@@ -4,6 +4,7 @@ module Models
 export  Model, 
         Layer,
         DenseLayer,
+        ResidualLayer,
         ModelStructure, 
         ParameterisedFunction,
         NormalisingFlowLayer,
@@ -26,7 +27,8 @@ export  diagonal_gaussian_prior_creator,
         produce_degenerate,
         simple_apply_grad,
         produceMultiModel,
-        init_means
+        init_means,
+        count_params
 
 using Statistics
 using LinearAlgebra
@@ -124,9 +126,7 @@ function simple_apply_grad(m::Models.Model, g)
 end
 
 function produce_degenerate(layers::Vector, n_inputs::Int)
-    n_weights = n_inputs * layers[1].n +
-        sum([layers[i].n * layers[i + 1].n for i in 1:length(layers) - 1])
-    n_params = n_weights + sum(layers .|> (x -> x.n))
+    n_params = count_params(layers, n_inputs)
     DegenerateModel(
         simple_apply_grad,
         ModelStructure(layers, n_inputs, n_params),
@@ -264,13 +264,13 @@ function regression_log_likelihood(m::Model, w::AbstractArray,
 end
 
 # log P(D|w)P(w)
-function log_density(m::Model, w::AbstractArray, 
+function log_density(m::Model, W::AbstractArray, 
         X::AbstractMatrix{Float64}, y::AbstractArray; coef = 1)
     mapped_log_likelihood = (m, X, y) -> (w -> m.log_likelihood(m, w, X, y))
     log_prior = m.log_prior.func(m.log_prior.θ)
 
-    return coef * mean(log_prior.(eachcol(w))) + 
-        mean(mapped_log_likelihood(m, X, y).(eachcol(w)))
+    return coef * mean(log_prior.(eachcol(W))) + 
+        mean(mapped_log_likelihood(m, X, y).(eachcol(W)))
 end
 
 # forward pass of model architecture for data X and weights.
@@ -303,6 +303,7 @@ function pred(s::ModelStructure, weights::AbstractArray,
             biases_1 = weights[end - next_i_b - s.layers[i].n1 + 1: end - next_i_b]
             next_i_w = next_i_w + w_offset * s.layers[i].n1
             next_i_b = next_i_b + s.layers[i].n1
+            w_offset = s.layers[i].n1
 
             layer_weights_2 = weights[next_i_w:next_i_w + s.layers[i].n1 * s.layers[i].n2 - 1]
             layer_weights_2 = reshape(layer_weights_2, (s.layers[i].n2, w_offset))
@@ -312,30 +313,52 @@ function pred(s::ModelStructure, weights::AbstractArray,
 
             output_temp = s.layers[i].activation.(layer_weights_1 * output .+ biases_1)
             output = output + (layer_weights_2 * output_temp .+ biases_2)
-            # don't need to change w_offset
+            w_offset = s.layers[i].n2
         end
     end
     return output
 end
 
+function count_params(layers::Vector, input_n::Int)
+    f(x) = typeof(x) == DenseLayer ? x.n : x.n1 + x.n2
+    biases = layers .|> f |> sum
+    foldl(
+        ((n, last_n), l) -> (
+            n + (typeof(l) == DenseLayer ? last_n * l.n : last_n * l.n1 + l.n1 * l.n2), 
+            typeof(l) == DenseLayer ? l.n : last_n
+        ),
+        layers,
+        init = (0, input_n)
+    )[1] + biases
+end
+
 function init_means(layers::Vector, input_n::Int)
-    means = Vector(undef, length(layers))
+    function real_length(l)
+        if typeof(l) == DenseLayer
+            return 1
+        elseif typeof(l) == ResidualLayer
+            return 2
+        end
+    end
+
+    means = Vector(undef, sum(real_length.(layers)))
     j = 0
+
     for i in 1:length(layers)
+        if i == 1
+            output_n = input_n
+        else
+            output_n = typeof(layers[i - 1]) == DenseLayer ? 
+                layers[i - 1].n : 
+                layers[i - 1].n2
+        end
+
         if typeof(layers[i]) == DenseLayer
             j += 1
-            if i == 1
-                means[j] = glorot_uniform(input_n, layers[i].n)
-            else
-                means[j] = glorot_uniform(layers[i - 1].n, layers[i].n)
-            end
+            means[j] = glorot_uniform(output_n, layers[i].n)
         elseif typeof(layers[i]) == ResidualLayer
             j += 1
-            if i == 1
-                means[j] = glorot_uniform(input_n, layers[i].n1)
-            else
-                means[j] = glorot_uniform(layers[i - 1].n2, layers[i].n1)
-            end
+            means[j] = glorot_uniform(output_n, layers[i].n1)
             j += 1
             means[j] = glorot_uniform(layers[i].n1, layers[i].n2)
         end

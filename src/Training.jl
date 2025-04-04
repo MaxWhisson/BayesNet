@@ -94,7 +94,7 @@ end
 
 # train model 'm' on data 'X' and 'y'
 function train!(ms::Vector, X::Matrix{Float64}, y::AbstractArray, args::TrainArgs;
-        prior_block = 100, prior_epochs = 10)
+        prior_block = 100, prior_epochs = 10, notification_rate = 20)
     # for replicating results
     args.training_params.random_seed != -1 && Random.seed!(args.training_params.random_seed)
 
@@ -131,9 +131,10 @@ function train!(ms::Vector, X::Matrix{Float64}, y::AbstractArray, args::TrainArg
             optimiser_state = update_parameters!(ms, X_batch, y_batch, args, batch_i + 1, no_batches, optimiser_state)
             losses[batch_i + 1] = args.loss_fn(ms, X_batch, y_batch, args.training_params, batch_i + 1, no_batches)
         end
+        
         allLosses[epoch] = sum(losses) 
-        if (epoch % 1 == 0) && (length(losses) > 0)
-            @info "Mean loss of epoch $(epoch): $(mean(losses))"
+        if (epoch % notification_rate == 0) && (length(losses) > 0)
+            @info "Loss of epoch $(epoch): $(sum(losses))"
         end
     end
     return allLosses

@@ -58,13 +58,13 @@ end
 # from 0
 function prune_diagonal_gaussian_CI!(m; CI_probability = 0.9)
     function f(μ, log_σ)
-        cdf(Normal(μ, exp(log_σ)), 0) > 1 - CI_probability / 2
+        cdf(Normal(abs(μ), exp(log_σ)), 0) > (1 - CI_probability) / 2
     end
 
     function g(offset, m)
         function h(i)
-            if f(m.θ[i], m.θ[1 + offset])
-                m.θ[i], m.θ[1 + offset] = 0, -Inf
+            if f(m.θ[i], m.θ[i + offset])
+                m.θ[i], m.θ[i + offset] = 0, -Inf
             end
         end
     end

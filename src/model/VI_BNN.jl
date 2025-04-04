@@ -72,9 +72,7 @@ function VariationalGaussianModel(prior_creator::Function,
         normalising_flow::AbstractArray = [], 
         init_param_fn = (n ->(n[1], randn(n[1] + n_f[2]))))
 
-    n_weights = n_inputs * layers[1].n +
-        sum([layers[i].n * layers[i + 1].n for i in 1:length(layers) - 1])
-    n_params = n_weights + sum(layers .|> (x -> x.n))
+    n_params = Models.count_params(layers, n_inputs)
 
     instantiated_flow = map(f -> f(n_params), normalising_flow) 
     n_flow_params = instantiated_flow != [] ? 
@@ -105,7 +103,7 @@ end
 
 # simpler constructor for model architectures with full Gaussian weights.
 function VariationalFullGaussianModel(log_likelihood::Function, n_inputs::Int,
-        layers::Vector; 
+        layers::Vector; hyper_weight = 0.1,
         normalising_flow::AbstractArray = [])
 
     function init_param_fn_full(n, n_f)
@@ -123,7 +121,7 @@ function VariationalFullGaussianModel(log_likelihood::Function, n_inputs::Int,
     end
 
     VariationalGaussianModel(
-        diagonal_gaussian_prior_creator,
+        n_params -> diagonal_gaussian_prior_creator(n_params, hyper_weight = hyper_weight),
         log_likelihood, 
         n_inputs, 
         false, 
@@ -135,7 +133,7 @@ end
 
 # simpler constructor for model architectures with diagonal Gaussian weights.
 function VariationalDiagonalGaussianModel(log_likelihood::Function, 
-        n_inputs::Int, layers::Vector; 
+        n_inputs::Int, layers::Vector; hyper_weight = 0.1,
         normalising_flow::AbstractArray = [])
 
     function init_param_fn_diag(n, n_f)
@@ -147,7 +145,7 @@ function VariationalDiagonalGaussianModel(log_likelihood::Function,
     end
 
     VariationalGaussianModel(
-        diagonal_gaussian_prior_creator,
+        n_params -> diagonal_gaussian_prior_creator(n_params, hyper_weight = hyper_weight),
         log_likelihood, 
         n_inputs, 
         true, 

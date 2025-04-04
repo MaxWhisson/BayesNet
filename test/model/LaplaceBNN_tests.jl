@@ -17,7 +17,7 @@ function test_MAP_loss_fn()
     )
     X = [1.0 1.1]
     y = [1.0;0.0]
-    typeof(BayesNet.create_MAP_loss_fn()(m, X, y, BayesNet.TrainingParameters(), 0, 0)) == Float64
+    typeof(BayesNet.create_MAP_loss_fn()([m], X, y, BayesNet.TrainingParameters(), 0, 0)) == Float64
 end
 
 function test_fit_covariance()

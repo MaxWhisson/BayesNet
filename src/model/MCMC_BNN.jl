@@ -102,7 +102,7 @@ function langevin_dynamics_MCMC_sampler(m::Models.MCMC_Model,
     N = length(y)
     n = batch_size
 
-    optimiser_rule = Optimisers.Adam() 
+    optimiser_rule = Optimisers.Adam(0.01) 
     optimiser_state = Optimisers.init(optimiser_rule, w)
 
     for epoch in 1:args.max_epoch
@@ -127,7 +127,7 @@ function langevin_dynamics_MCMC_sampler(m::Models.MCMC_Model,
             
             t += 1
         end
-        if epoch % 20 == 0
+        if epoch % 1000 == 0
             @info "finished epoch $(epoch)"
         end
     end

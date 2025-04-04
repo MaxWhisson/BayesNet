@@ -74,7 +74,7 @@ function test_regression_log_likelihood()
     m = make_test_VI_regression_model(1, true, 1)
     X, y = generate_regression_data()
     w = randn(m.structure.n_total_params)
-    res = BayesNet.regression_log_likelihood(m, w, X, y) # probably 0
+    res = BayesNet.regression_log_likelihood(m, w, X, y') # probably 0
     true
 end
 

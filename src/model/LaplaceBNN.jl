@@ -23,9 +23,7 @@ using ..HelperFunctions
 function BuildLaplaceModel(priorCreator::Function, log_likelihood::Function, 
     n_inputs::Int, layers::Vector)
 
-    n_weights = n_inputs * layers[1].n +
-        sum([layers[i].n * layers[i + 1].n for i in 1:length(layers) - 1])
-    n_params = n_weights + sum(layers .|> (x -> x.n))
+    n_params = Models.count_params(layers, n_inputs)
 
     return Models.LaplaceModel( 
         Models.simple_apply_grad,
@@ -39,35 +37,26 @@ end
 function create_MAP_loss_fn(
         ;log_density_fn::Tuple{Bool, Function} = (false,log_density),
         n_samples::Int = 10)
-    function MAP_loss_fn(ms::Vector{Models.LaplaceModel}, X::AbstractMatrix{Float64},
+    function MAP_loss_fn(ms::Vector, X::AbstractMatrix{Float64},
             y::AbstractArray, args::Training.TrainingParameters, i::Int, 
             M::Int)
         m = ms[1]
-        if !log_density_fn[1]
-            return -log_density_fn[2](m, m.θ[1:m.structure.n_total_params], X, y, coef = 1/M)
-        end
-        
-        return -log_density_fn[2](
-            rand(get_approximating_distribution(m), n_samples)
-        )
+        return -log_density_fn[2](m, m.θ[1:m.structure.n_total_params], X, y, coef = 1/M)
     end
 end
 
 # find Hessian
 function create_fit_covariance(
-        ;log_density_fn::Tuple{Bool, Function} = (false,log_density), 
-        n_samples::Int = 10)
+        ;log_density_fn::Tuple{Bool, Function} = (false,log_density))
     function fit_covariance!(m::Models.LaplaceModel, 
             X::AbstractMatrix{Float64}, y::AbstractArray)
         H_inv = hessian(
-            θ -> !log_density_fn[1] ?
-                    -log_density_fn[2](m, θ, X, y) : 
-                    -log_density_fn[2](
-                        rand(get_approximating_distribution(m), n_samples)
-                    ),
+            θ -> -log_density_fn[2](m, θ, X, y),
             m.θ[1:m.structure.n_total_params]
         ) |> inv
-        # println(minimum(diag(inv(H))))
+
+        lower_H = LowerTriangular(H_inv)
+        H_inv = zeros(size(H_inv)) + lower_H + lower_H' - diagm(diag(H_inv))
 
         @assert issymmetric(H_inv) "Inverse Hessian isn't symmetric..."
         @assert isposdef(H_inv) "Inverse Hessian isn't positive definite..."
