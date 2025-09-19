@@ -1,7 +1,9 @@
+# module for defining training procedures
 module Training
 
 # type exports
-export  TrainingParameters,
+export  AbstractTrainingParameters,
+        TrainingParameters,
         TrainArgs
 
 # function exports
@@ -16,29 +18,34 @@ using Distributions
 
 import ..Models
 
-Base.@kwdef struct TrainingParameters
-    n_samples = 10
-    max_epoch = 200
-    batch_size = 20
-    optimiser_rule = Optimisers.Adam(0.1) 
-    prior_optimisation_strategy = "none"
-    random_seed = -1
-    is_natural = "none"
+abstract type AbstractTrainingParameters end
+
+# parameters of generalised training algorithm
+Base.@kwdef struct TrainingParameters <: AbstractTrainingParameters
+    n_samples = 10                          # for MC integration
+    max_epoch = 200                         # for SGD adjacent
+    batch_size = 20                         # for SGD adjacent
+    optimiser_rule = Optimisers.Adam(0.1)   # optimiser rule
+    prior_optimisation_strategy = "none"    # how prior should be optimised
+    random_seed = -1                        # seed for randomness
+    is_natural = "none"                     # how natural gradients should be used
 end
 
+# arguments for what to train against and the parameters
 struct TrainArgs
     loss_fn::Function
-    training_params::TrainingParameters
+    training_params::AbstractTrainingParameters
 end
 
-function compute_Fisher_diagonal(m;n_samples = 20)
+# compute Fisher information for diagonal Gaussians
+function compute_Fisher_diagonal(m)
     n_params = m.structure.n_total_params
     diag_mus = exp.(m.θ[n_params + 1:end]) .^ -2
     diag_sigmas = ones(n_params) .* 2
     return diagm([diag_mus;diag_sigmas])
-    # return diagm(ones(n_params * 2))
 end
 
+# procedure for updating parameters of a prior
 function update_prior_parameters!(ms::Vector, X_batch, y_batch, args, i, M)
     ∇θs_prior = gradient(
         () -> args.loss_fn(ms, X_batch, y_batch, args.training_params, i, M),
@@ -55,11 +62,16 @@ function update_prior_parameters!(ms::Vector, X_batch, y_batch, args, i, M)
     end
 end
 
+function clean_grad(g)
+    if g == nothing
+        @info "gradient was nothing"
+    end
+    g == nothing ? 0.0 : g
+end
+
+# update the parameters of a model
 function update_parameters!(ms::Vector, X_batch, y_batch, args, 
         i, M, optimiser_state)
-
-    uses_natural_gd = args.training_params.is_natural
-
     # optionally calculate gradients for prior of model
     if (args.training_params.prior_optimisation_strategy == "parallel")
         update_prior_parameters!(ms, X_batch, y_batch, args, i, M)
@@ -71,9 +83,11 @@ function update_parameters!(ms::Vector, X_batch, y_batch, args,
         Params((m -> m.θ).(ms))
     )
 
-    # and update with optimiser:
+    # println(args.loss_fn(ms, X_batch, y_batch, args.training_params, i, M))
+
+    # update with optimiser:
     for m_i in 1:length(ms)
-        if uses_natural_gd == "diagonal"
+        if args.training_params.is_natural == "diagonal"
             ∇θs[ms[m_i].θ] = (compute_Fisher_diagonal(ms[m_i]) \ ∇θs[ms[m_i].θ])
         end
         (optimiser_state[m_i], Δθ) = Optimisers.apply!(
@@ -88,48 +102,52 @@ function update_parameters!(ms::Vector, X_batch, y_batch, args,
     return optimiser_state
 end
 
-function clean_grad(g)
-    g == nothing ? 0.0 : g
+# update prior for for block
+function block_prior_update!(args::TrainArgs, X::Matrix{Float64}, y::AbstractArray, 
+        prior_epochs::Int, no_batches::Int, ms::Vector)
+    for i in 1:prior_epochs
+        for batch_i in 0:no_batches - 1
+            start_index = 1 + batch_i * args.training_params.batch_size
+            end_index = (batch_i + 1) * args.training_params.batch_size
+            X_batch = X[:, start_index:end_index]
+            y_batch = y[start_index:end_index]
+            update_prior_parameters!(ms, X_batch, y_batch, args, batch_i + 1, no_batches)
+        end
+    end
 end
 
-# train model 'm' on data 'X' and 'y'
-function train!(ms::Vector, X::Matrix{Float64}, y::AbstractArray, args::TrainArgs;
+# train models 'ms' on data 'X' and 'Y'
+# column samples
+function train!(ms::Vector, X::Matrix{Float64}, Y::Matrix{Float64}, args::TrainArgs;
         prior_block = 100, prior_epochs = 10, notification_rate = 20)
     # for replicating results
     args.training_params.random_seed != -1 && Random.seed!(args.training_params.random_seed)
 
+    # initial state
     optimiser_state = [Optimisers.init(args.training_params.optimiser_rule, m.θ) for m in ms]
-    no_batches = Int64(floor(length(y) / args.training_params.batch_size))
+    no_batches = Int64(floor(size(Y)[2] / args.training_params.batch_size))
     allLosses = Vector(undef, args.training_params.max_epoch)
     losses = Vector(undef, no_batches)
 
     @info "Training"
     for epoch in 1:args.training_params.max_epoch
-        indexes = shuffle(1:length(y))
-        X, y = X[:,indexes], y[indexes]
+        indexes = shuffle(1:size(Y)[2])
+        X, Y = X[:,indexes], Y[:,indexes]
 
+        # if block prior update is used
         if (args.training_params.prior_optimisation_strategy == "block") && (epoch % prior_block == 0)
-            for i in 1:prior_epochs
-                for batch_i in 0:no_batches - 1
-                    start_index = 1 + batch_i * args.training_params.batch_size
-                    end_index = (batch_i + 1) * args.training_params.batch_size
-
-                    X_batch = X[:, start_index:end_index]
-                    y_batch = y[start_index:end_index]
-                    update_prior_parameters!(ms, X_batch, y_batch, args, batch_i + 1, no_batches)
-                end
-            end
+            block_prior_update!(args, X, y, prior_epochs, no_batchesnt, ms)
         end
 
+        # update parameters for each batch in epoch
         for batch_i in 0:no_batches - 1
             start_index = 1 + batch_i * args.training_params.batch_size
             end_index = (batch_i + 1) * args.training_params.batch_size
-
-            X_batch = X[:, start_index:end_index]
-            y_batch = y[start_index:end_index]
-
-            optimiser_state = update_parameters!(ms, X_batch, y_batch, args, batch_i + 1, no_batches, optimiser_state)
-            losses[batch_i + 1] = args.loss_fn(ms, X_batch, y_batch, args.training_params, batch_i + 1, no_batches)
+            Xi = X[:, start_index:end_index]
+            Yi = Y[:, start_index:end_index]
+            optimiser_state = update_parameters!(ms, Xi, Yi, args, 
+                batch_i + 1, no_batches, optimiser_state)
+            losses[batch_i + 1] = args.loss_fn(ms, Xi, Yi, args.training_params, batch_i + 1, no_batches)
         end
         
         allLosses[epoch] = sum(losses) 

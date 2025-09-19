@@ -44,9 +44,9 @@ function make_test_VI_model(D::Int, is_diagonal::Bool, n_out::Int; log_l = Bayes
         log_l, 
         D,
         [
-            BayesNet.DenseLayer(10, leaky_relu), 
-            BayesNet.DenseLayer(5, leaky_relu), 
-            BayesNet.DenseLayer(n_out, logistic)
+            BayesNet.Dense(10, leaky_relu), 
+            BayesNet.Dense(5, leaky_relu), 
+            BayesNet.Dense(n_out, logistic)
         ]
     )
 end
@@ -58,7 +58,7 @@ function make_test_VI_regression_model(D::Int, is_diagonal::Bool, n_out::Int)
     return f(
         BayesNet.regression_log_likelihood, 
         D,
-        [BayesNet.DenseLayer(5, leaky_relu), BayesNet.DenseLayer(n_out, x -> x)]
+        [BayesNet.Dense(5, leaky_relu), BayesNet.Dense(n_out, x -> x)]
     )
 end
 
@@ -68,8 +68,8 @@ function make_test_binary_MCMC(D)
         BayesNet.binary_log_likelihood,
         D,
         [
-            BayesNet.DenseLayer(5, leaky_relu), 
-            BayesNet.DenseLayer(1, logistic), 
+            BayesNet.Dense(5, leaky_relu), 
+            BayesNet.Dense(1, logistic), 
         ]
     )
 end

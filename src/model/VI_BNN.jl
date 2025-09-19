@@ -302,6 +302,7 @@ function variational_free_energy_creator(is_closed_form_gaussian::Bool,
         coef_func::Function; λ::Float64 = 1.0, λγ::Float64 = 100.0,
         α₀::Float64 = 12.0, β₀::Float64 = 0.1, is_adaptive_regression::Bool = false,
         custom_log_density::Tuple{Bool, Function} = (false, x->x))
+
     function f(ms::Vector, X::AbstractMatrix{Float64}, 
             y::AbstractArray, args::Training.TrainingParameters, 
             i::Int, M::Int)
@@ -478,7 +479,7 @@ function update_online_diagonal_gaussian_posterior!(
 end
 
 function find_uncertainties(m::Models.VariationalModel, 
-        y::AbstractArray, U::AbstractMatrix{Float64}, n_active_samples::Int)
+        U::AbstractMatrix{Float64}, n_active_samples::Int)
     W = sample_model(m, n_active_samples)
 
     uncertainties = map(x -> AL_datapoint_uncertainty(m, W, x), eachcol(U))
@@ -486,7 +487,7 @@ function find_uncertainties(m::Models.VariationalModel,
 end
 
 function active_learning!(m::Models.VariationalModel, 
-        X::AbstractMatrix{Float64}, y::AbstractArray, 
+        X::AbstractMatrix{Float64}, Y::AbstractMatrix{Float64}, 
         U::AbstractMatrix{Float64}, oracle::Function, 
         args::Training.TrainArgs, iterations::Int; n_active_samples::Int = 20, 
         threshold::Float64 = -Inf, retrains = true)
@@ -495,7 +496,7 @@ function active_learning!(m::Models.VariationalModel,
 
     i = 1
     while true
-        uncertainties = find_uncertainties(m, y, U, n_active_samples)
+        uncertainties = find_uncertainties(m, U, n_active_samples)
         max_uncertainty_i = argmax(uncertainties)
         max_uncertainty = uncertainties[max_uncertainty_i]
         Ux_max = U[:,max_uncertainty_i]
@@ -503,19 +504,19 @@ function active_learning!(m::Models.VariationalModel,
 
         U = U[1:end, 1:end .!= max_uncertainty_i]
         X = [X Ux_max]
-        y = [y;Uy_max]
+        Y = [Y Uy_max]
         
         i = i + 1
 
         if retrains
-            Training.train!([m], X, y, args)
+            Training.train!([m], X, Y, args)
         else
             update_online_diagonal_gaussian_posterior!(m, n_active_samples,
                 Ux_max, [Uy_max])
         end
 
         if !((U != []) && (max_uncertainty > threshold) && i <= iterations)
-            return (X, y)
+            return (X, Y)
         end
     end
 end

@@ -1,13 +1,32 @@
 module BayesNet
 
 include("HelperFunctions.jl")
+
+include("model/flows/Normalising.jl")
+include("model/flows/Planar.jl")
+include("model/flows/Radial.jl")
+
+include("model/layers/Layer.jl")
+include("model/layers/DenseLayer.jl")
+include("model/layers/ResidualLayer.jl")
+
 include("model/Models.jl") 
-include("model/Samplers.jl") 
 include("Training.jl")
+
+include("model/Samplers.jl") 
 include("model/LaplaceBNN.jl") 
 include("model/VI_BNN.jl") 
 include("model/MCMC_BNN.jl") 
+
 include("Analysis.jl")
+
+using .Normalising
+using .Planar
+using .Radial
+
+using .Layer
+using .DenseLayer
+using .ResidualLayer
 
 using .HelperFunctions
 using .Models

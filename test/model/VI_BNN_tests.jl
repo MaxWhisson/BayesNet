@@ -140,8 +140,8 @@ function test_equivalent_posterior_densities(D)
         x -> x,
         D,
         [
-            # BayesNet.DenseLayer(20, x -> x),
-            BayesNet.DenseLayer(1, x -> x)
+            # BayesNet.Dense(20, x -> x),
+            BayesNet.Dense(1, x -> x)
         ]
     )
 
@@ -149,8 +149,8 @@ function test_equivalent_posterior_densities(D)
         x -> x,
         D,
         [
-            # BayesNet.DenseLayer(20, x -> x),
-            BayesNet.DenseLayer(1, x -> x)
+            # BayesNet.Dense(20, x -> x),
+            BayesNet.Dense(1, x -> x)
         ]
     )
 
