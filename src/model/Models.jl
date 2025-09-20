@@ -124,8 +124,7 @@ function diagonal_gaussian_prior_creator(n_params::Int; weight = log(0.1),
         state,
         θ,
         θ -> w -> -((w - θ[1:n_params])' * 
-            diagm(exp.(θ[n_params + 1:end])) * 
-            (w - θ[1:n_params]) +
+            (exp.(θ[n_params + 1:end]) .* (w - θ[1:n_params])) +
             hyper_weight * θ[1:n_params]' * θ[1:n_params])
     )
 end
@@ -164,12 +163,12 @@ end
 
 # log P(D|w)P(w)
 function log_density(m::Model, W::AbstractArray, 
-        X::AbstractMatrix{Float64}, y::AbstractArray; coef = 1)
-    mapped_log_likelihood = (m, X, y) -> (w -> m.log_likelihood(m, w, X, y))
+        X::AbstractMatrix{Float64}, Y::AbstractArray; coef = 1)
+    mapped_log_likelihood = (m, X, Y) -> (w -> m.log_likelihood(m, w, X, Y))
     log_prior = m.log_prior.func(m.log_prior.θ)
 
-    return coef * mean(log_prior.(eachcol(W))) + 
-        mean(mapped_log_likelihood(m, X, y).(eachcol(W)))
+    return mean(mapped_log_likelihood(m, X, Y).(eachcol(W))) #+
+        coef * mean(log_prior.(eachcol(W)))
 end
 
 # forward pass of model architecture for data X and weights.

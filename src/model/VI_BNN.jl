@@ -161,18 +161,11 @@ function log_diagonal_gaussian_posterior(m::Models.Model,
     variational_params = m.θ[1:m.n_variational_params]
     n_params = m.structure.n_total_params
 
-    ma = diagm(exp.(variational_params[n_params + 1:end]) .^ 2)
-    if !issymmetric(ma) || !isposdef(ma)
-        display(exp.(variational_params[n_params + 1:end]) .^ 2)
-    end
-
-    # might need to report zeros?
     Σ_diag = exp.(variational_params[n_params + 1:end]) .^ 2
 
-    log_posterior_pdf = sample -> logpdf(MvNormal(
-        variational_params[1:n_params], 
-        diagm(Σ_diag)
-    ), sample)
+    μ = variational_params[1:n_params]
+    log_posterior_pdf = x -> -log((2π) ^ (length(x/2))) - 0.5(((x - μ) .* Σ_diag))' * (x - μ)
+
     return log_posterior_pdf.(eachcol(samples))
 end
 
