@@ -9,6 +9,7 @@ include("model/flows/Radial.jl")
 include("model/layers/Layer.jl")
 include("model/layers/DenseLayer.jl")
 include("model/layers/ResidualLayer.jl")
+include("model/layers/LSTMLayer.jl")
 
 include("model/Models.jl") 
 include("Training.jl")
@@ -27,6 +28,7 @@ using .Radial
 using .Layer
 using .DenseLayer
 using .ResidualLayer
+using .LSTMLayer
 
 using .HelperFunctions
 using .Models

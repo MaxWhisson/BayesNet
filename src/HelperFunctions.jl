@@ -78,6 +78,15 @@ end
     L′ -> (flatten_triangular(L′, D), 0)
 )
 
+function set_vector_elem!(v::AbstractVector, elem)
+    [v;elem]
+end
+
+@Zygote.adjoint set_vector_elem!(v, elem) = (
+    set_vector_elem!(v, elem),
+    v′ -> (v′[1:end-1], v′[end])
+)
+
 # initialise lower triangular diagonal matrix
 function init_L_diagonal_cov(D)
     init_L = -20ones(triangular(D))

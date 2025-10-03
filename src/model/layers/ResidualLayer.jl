@@ -4,9 +4,16 @@ module ResidualLayer
             initialise_parameters,
             output_dimension,
             n_weights,
-            extract_parameters
+            extract_parameters,
+            init_state
 
-    import ..Layer:NNLayer, forward, initialise_parameters, output_dimension, n_weights, extract_parameters
+    import ..Layer:NNLayer, 
+        forward, 
+        initialise_parameters, 
+        output_dimension, n_weights, 
+        extract_parameters,
+        init_state
+
     import Flux.glorot_uniform
 
     # struct for specifying a residual neural network layer.
@@ -31,9 +38,9 @@ module ResidualLayer
     end
 
     function forward(l::Residual, layer_params::AbstractVector, 
-            input::AbstractArray{Float64})
+            input::AbstractArray{Float64}, state::AbstractVector{Float64})
         output_l1 = s.layers[i].activation.(layer_params[1] * input .+ layer_params[2])
-        return input + (layer_params[3] * output_l1 .+ layer_params[4])
+        return (input + (layer_params[3] * output_l1 .+ layer_params[4]), 0)
     end
 
     function initialise_parameters(l::Residual, n_in::Int)
@@ -51,5 +58,9 @@ module ResidualLayer
 
     function n_weights(l::Residual, n_in::Int)
         return (l.n1 + l.n2) + (n_in * l.n1) + (l.n1 * l.n2)
+    end
+
+    function init_state(l::Residual)
+        return []
     end
 end

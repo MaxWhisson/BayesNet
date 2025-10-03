@@ -4,9 +4,16 @@ module DenseLayer
             initialise_parameters,
             output_dimension,
             n_weights,
-            extract_parameters
+            extract_parameters,
+            init_state
 
-    import ..Layer:NNLayer, forward, initialise_parameters, output_dimension, n_weights, extract_parameters
+    import ..Layer:NNLayer, 
+        forward, 
+        initialise_parameters, 
+        output_dimension, n_weights, 
+        extract_parameters,
+        init_state
+    
     import Flux.glorot_uniform
     
     # struct for specifying a dense neural network layer.
@@ -16,8 +23,8 @@ module DenseLayer
     end
 
     function forward(l::Dense, layer_params::AbstractVector, 
-            input::AbstractArray{Float64})
-        return l.activation.(layer_params[1] * input .+ layer_params[2])
+            input::AbstractArray{Float64}, state::AbstractVector{Float64})
+        return (l.activation.(layer_params[1] * input .+ layer_params[2]), 0)
     end
 
     function initialise_parameters(l::Dense, n_in::Int)
@@ -38,5 +45,9 @@ module DenseLayer
         weights = reshape(params[i:j - 1], (l.n, last_output_n))
         biases = params[j: j + l.n - 1]
         return (j + l.n, [weights, biases])
+    end
+
+    function init_state(l::Dense)
+        return []
     end
 end

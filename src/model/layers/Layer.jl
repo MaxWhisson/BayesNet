@@ -4,12 +4,13 @@ module Layer
             initialise_parameters,
             output_dimension,
             n_weights,
-            extract_parameters
+            extract_parameters,
+            init_state
 
     abstract type NNLayer end
 
     function forward(l::NNLayer, layer_params::AbstractVector,
-            input::AbstractArray{Float64})
+            input::AbstractArray{Float64}, state::AbstractVector{Float64})
         throw("unimplemented 'forward' method")
     end
 
@@ -28,5 +29,9 @@ module Layer
 
     function n_weights(l::NNLayer, n_in::Int)
         throw("unimplemented 'n_weights' method")
+    end
+
+    function init_state(l::NNLayer)
+        throw("unimplemented 'extract_state' method")
     end
 end

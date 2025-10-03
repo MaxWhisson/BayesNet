@@ -42,6 +42,7 @@ using ..Radial
 
 using ..DenseLayer
 using ..ResidualLayer
+using ..LSTMLayer
 
 abstract type Model end
 
@@ -171,22 +172,52 @@ function log_density(m::Model, W::AbstractArray,
         coef * mean(log_prior.(eachcol(W)))
 end
 
+function set_vector_elem_ret!(out, elem, vec)
+    HelperFunctions.set_vector_elem!(vec, elem)
+    return out
+end
+
+function pred(s::ModelStructure, weights::AbstractArray,
+        X::AbstractArray)
+    initState = [init_state(l) for l in s.layers]
+    state = [initState]
+    output = nothing
+
+    for i in 1:size(X)[3]
+        output = pred(s, weights, X[:,:,i], state[end]) |>
+            ((out, passState) -> set_vector_elem_ret!(out, passState, state))
+    end
+
+    return (output, state[end])
+end
+
+function pred(s::ModelStructure, weights::AbstractArray, 
+        X::AbstractMatrix)
+    initState = [init_state(l) for l in s.layers]
+    pred(s, weights, X, initState)
+end
+
 # forward pass of model architecture for data X and weights.
 function pred(s::ModelStructure, weights::AbstractArray, 
-        X::AbstractArray)
+        X::AbstractMatrix, initState::AbstractVector)
 
     # initialise forward pass state
     output = X                      # previous layer output
     w_index = 1                     # next index to start from for weights
     last_output_n = s.n_inputs      # last layer dimension
 
+    passState = []
+
     # iterate over the layers of the network
-    for l in s.layers
-        (w_index, layer_weights) = extract_parameters(l, weights, w_index, last_output_n)
-        output = forward(l, layer_weights, output)
-        last_output_n = output_dimension(l)
+    for i in length(s.layers)
+        (w_index, layer_weights) = extract_parameters(
+            s.layers[i], weights, w_index, last_output_n
+        )
+        output = forward(s.layers[i], layer_weights, output, initState[i]) |>
+            ((out, layerState) -> set_vector_elem_ret!(out, layerState, passState))
+        last_output_n = output_dimension(s.layers[i])
     end
-    return output
+    return (output, passState)
 end
 
 function count_params(layers::Vector, input_n::Int)
