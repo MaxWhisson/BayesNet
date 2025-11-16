@@ -5,14 +5,16 @@ module ResidualLayer
             output_dimension,
             n_weights,
             extract_parameters,
-            init_state
+            init_state,
+            get_layer_state
 
     import ..Layer:NNLayer, 
         forward, 
         initialise_parameters, 
         output_dimension, n_weights, 
         extract_parameters,
-        init_state
+        init_state,
+        get_layer_state
 
     import Flux.glorot_uniform
 
@@ -23,30 +25,50 @@ module ResidualLayer
         activation::Function
     end
 
-    function extract_parameters(l::Residual, params::AbstractVector, i1::Int, 
-            last_output_n::Int)
-        j1 = i1 + last_output_n * l.n1
-        weights_1 = reshape(params[i1:j1 - 1], (l.n1, last_output_n))
-        biases_1 = params[j1:j1 + l.n1 - 1]
+    function extract_parameters(l::Residual, params::AbstractVector, pos::Int, 
+            last_outputs_n::Vector{Int})
+        extractedParams = Vector(undef, 2 * (length(last_outputs_n) + 1))
+        nextPos = 0
 
-        i2 = j + l.n1
-        j2 = i2 + l.n1 * l.n2
-        weights_2 = reshape(params[i2:j2 - 1], (l.n2, l.n1))
-        biases_2 = params[j2:j2 + l.n2 - 1]
-        
-        return (j2 + l.n2, [weights_1, biases_1, weights_2, biases_2])
+        for i in eachindex(last_outputs_n)
+            nextPos = pos + last_outputs_n[i] * l.n1
+            extractedParams[2(i - 1) + 1] = reshape(
+                params[pos:nextPos - 1],
+                (l.n1, last_outputs_n[i])
+            )
+
+            pos = nextPos
+            nextPos += l.n1
+            extract_parameters[2i] = params[pos: nextPos - 1]
+            pos = nextPos
+        end
+
+        pos = nextPos
+        nextPos += l.n1 * l.n2
+        extract_parameters[end - 1] = reshape(params[pos:nextPos - 1], (l.n2, l.n1))
+
+        pos = nextPos
+        nextPos += l.n2
+        extract_parameters[end] = params[pos:nextPos - 1]
+    
+        return (nextPos, extractedParams)
     end
 
     function forward(l::Residual, layer_params::AbstractVector, 
-            input::AbstractArray{Float64}, state::AbstractVector{Float64})
-        output_l1 = s.layers[i].activation.(layer_params[1] * input .+ layer_params[2])
-        return (input + (layer_params[3] * output_l1 .+ layer_params[4]), 0)
+            inputs::AbstractArray, state::AbstractMatrix{Float64})
+        output = [
+            l.activation.(layer_params[2(i - 1) + 1] * input .+ layer_params[2i])
+            for i in eachindex(inputs)
+        ] |> sum
+        return (sum(inputs) + (layer_params[end - 1] * output .+ layer_params[end]), [])
     end
 
-    function initialise_parameters(l::Residual, n_in::Int)
-        return [
-            reshape(glorot_uniform(n_in, l.n1), (n_in * l.n1, 1));
-            zeros(l.n1);
+    function initialise_parameters(l::Residual, ns_in::Vector{Int})
+        return [([
+            [reshape(glorot_uniform(n_in, l.n1), (n_in * l.n1, 1));
+            zeros(l.n1)]
+            for n_in in ns_in
+        ] |> (x -> reduce(vcat, x)));
             reshape(glorot_uniform(l.n1, l.n2), (l.n1 * l.n2, 1));
             zeros(l.n2)
         ]
@@ -56,11 +78,16 @@ module ResidualLayer
         return l.n2
     end
 
-    function n_weights(l::Residual, n_in::Int)
-        return (l.n1 + l.n2) + (n_in * l.n1) + (l.n1 * l.n2)
+    function n_weights(l::Residual, ns_in::Vector{Int})
+        return l.n2 + (l.n1 * l.n2) + [l.n1 + (n_in * l.n1) for n_in in ns_in] |> sum
     end
 
     function init_state(l::Residual)
         return []
+    end
+
+    # state will be [] here
+    function get_layer_state(l::Residual, state::AbstractVector)
+        return zeros(l.n2)
     end
 end

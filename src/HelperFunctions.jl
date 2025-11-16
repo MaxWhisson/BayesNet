@@ -9,7 +9,8 @@ export  propagate_matrix_opp,
         to_lower_triangular,
         trace,
         set_sub_vector_expr,
-        init_L_diagonal_cov
+        init_L_diagonal_cov,
+        deep_foldl
 
 using Zygote
 
@@ -78,14 +79,22 @@ end
     L′ -> (flatten_triangular(L′, D), 0)
 )
 
-function set_vector_elem!(v::AbstractVector, elem)
-    [v;elem]
+function set_vector_elem!(v::AbstractVector, i::Int, elem)
+    v[i] = elem
+    v
 end
 
-@Zygote.adjoint set_vector_elem!(v, elem) = (
-    set_vector_elem!(v, elem),
-    v′ -> (v′[1:end-1], v′[end])
+@Zygote.adjoint set_vector_elem!(v, i, elem) = (
+    set_vector_elem!(v, i, elem),
+    v′ -> (v′, 0, v′[i])
 )
+
+function deep_foldl(f, iterator, acc)
+    if isempty(iterator)
+        return acc
+    end
+    return deep_foldl(f, iterator[2:end], f(acc, iterator[1]))
+end
 
 # initialise lower triangular diagonal matrix
 function init_L_diagonal_cov(D)

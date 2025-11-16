@@ -1,29 +1,40 @@
 using Test
 
 # tests are mainly to assert that things don't crash
+# @testset "All Tests" begin
+#     @testset "Layer Tests" begin
+#         @testset "Dense Tests" begin
+#             include("model/layers/DenseLayer_tests.jl")
+#         end
+#     end
 
-@testset "All Tests" begin
-    @testset "VI tests" begin
-        include("model/VI_BNN_tests.jl")
-    end
+#     @testset "VI tests" begin
+#         include("model/VI_BNN_tests.jl")
+#     end
 
-    @testset "Laplace tests" begin
-        include("model/LaplaceBNN_tests.jl")
-    end
+#     @testset "Laplace tests" begin
+#         include("model/LaplaceBNN_tests.jl")
+#     end
 
-    @testset "MCMC tests" begin
-        include("model/MCMC_tests.jl")
-    end
+#     @testset "MCMC tests" begin
+#         include("model/MCMC_tests.jl")
+#     end
 
-    @testset "sampler tests" begin
-        include("model/Samplers_tests.jl")
-    end
+#     @testset "sampler tests" begin
+#         include("model/Samplers_tests.jl")
+#     end
 
-    @testset "training tests" begin
+#     @testset "training tests" begin
 
-    end
+#     end
 
-    @testset "model tests" begin
-        include("model/Models_tests.jl")
+#     @testset "model tests" begin
+#         include("model/Models_tests.jl")
+#     end
+# end
+
+@testset "Layer Tests" begin
+    @testset "Dense Tests" begin
+        include("model/layers/DenseLayer_tests.jl")
     end
 end

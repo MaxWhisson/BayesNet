@@ -5,17 +5,19 @@ module LSTMLayer
             output_dimension,
             n_weights,
             extract_parameters,
-            init_state
+            init_state,
+            get_layer_state
 
     import ..Layer:NNLayer, 
         forward, 
         initialise_parameters, 
         output_dimension, n_weights, 
         extract_parameters,
-        init_state
+        init_state,
+        get_layer_state
         
     import Flux.glorot_uniform
-    using LogExpFunctions.logistic
+    using LogExpFunctions
     
     # struct for specifying a dense neural network layer.
     struct LSTM <: NNLayer
@@ -24,7 +26,8 @@ module LSTMLayer
     end
 
     function forward(l::LSTM, layer_params::AbstractVector,  
-            input::AbstractArray{Float64}, state::AbstractVector{Float64})
+            input::AbstractArray{Float64}, state::AbstractMatrix{Float64})
+            # TODO over matrix
         return lstm(state[1:l.n], state[l.n + 1:2l.n], input, layer_params[1])
     end
 
@@ -54,12 +57,16 @@ module LSTMLayer
     end
 
     function extract_parameters(l::LSTM, params::AbstractVector{Float64}, i::Int, 
-            last_output_n::Int)
+            last_output_n::AbstractVector{Int})
         j = i + 11l.n
         return (j, [params[i:j - 1]])
     end
 
     function init_state(l::LSTM)
-        return zeros(i + 2n, state[i:i + 2n - 1])
+        return zeros(2l.n)
+    end
+
+    function get_layer_state(l::LSTM, state::AbstractVector)
+        return state[l.n + 1:end]
     end
 end
