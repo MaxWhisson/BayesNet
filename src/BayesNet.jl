@@ -2,6 +2,8 @@ module BayesNet
 
 include("HelperFunctions.jl")
 
+include("model/types/ModelTypes.jl")
+
 include("model/flows/Normalising.jl")
 include("model/flows/Planar.jl")
 include("model/flows/Radial.jl")
@@ -20,6 +22,9 @@ include("model/VI_BNN.jl")
 include("model/MCMC_BNN.jl") 
 
 include("Analysis.jl")
+
+using .ModelTypes
+using .ModelFunctions
 
 using .Normalising
 using .Planar

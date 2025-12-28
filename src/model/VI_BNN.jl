@@ -37,6 +37,8 @@ using ..Samplers
 using ..Models
 using ..Training
 using ..HelperFunctions
+using ..ModelFunctions: init_means,
+        count_params
 
 function VariationalUnitGaussianModel(log_likelihood::Function, 
         n_inputs::Int, layers::Vector; 
@@ -72,7 +74,7 @@ function VariationalGaussianModel(prior_creator::Function,
         normalising_flow::AbstractArray = [], 
         init_param_fn = (n ->(n[1], randn(n[1] + n_f[2]))))
 
-    n_params = Models.count_params(layers, n_inputs)
+    n_params = count_params(layers, [n_inputs])
 
     instantiated_flow = map(f -> f(n_params), normalising_flow) 
     n_flow_params = instantiated_flow != [] ? 
@@ -114,7 +116,7 @@ function VariationalFullGaussianModel(log_likelihood::Function, n_inputs::Int,
             init_L[t] = -5
         end
 
-        layer_means_init = Models.init_means(layers, n_inputs)
+        layer_means_init = init_means(layers, Models.create_simple_evaluation(layers), [n_inputs])
         normalising_init = randn(n_f)
 
         n + HelperFunctions.triangular(n), [layer_means_init;init_L;normalising_init]
@@ -138,7 +140,7 @@ function VariationalDiagonalGaussianModel(log_likelihood::Function,
 
     function init_param_fn_diag(n, n_f)
         init_log_σ = ones(n) * -5
-        layer_means_init = Models.init_means(layers, n_inputs)
+        layer_means_init = init_means(layers, Models.create_simple_evaluation(layers), [n_inputs])
         normalising_init = randn(n_f)
 
         2 * n, [layer_means_init;init_log_σ;normalising_init]

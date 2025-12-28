@@ -23,9 +23,7 @@ export  diagonal_gaussian_prior_creator,
         pred,
         produce_degenerate,
         simple_apply_grad,
-        produceMultiModel,
-        init_means,
-        count_params
+        produceMultiModel
 
 using Statistics
 using LinearAlgebra
@@ -45,6 +43,18 @@ using ..ResidualLayer
 using ..LSTMLayer
 
 import ..HelperFunctions: trace, deep_foldl, set_vector_elem!
+using ..ModelTypes: 
+        Model, 
+        EvalStrategy,
+        ModelStructure,
+        ParameterisedFunction,
+        VariationalModel,
+        LaplaceModel,
+        MCMC_Model,
+        DegenerateModel
+
+using ..ModelFunctions: init_means,
+        count_params
 
 abstract type Model end
 
@@ -109,7 +119,7 @@ end
 
 # simple evaluation strategy for generic feed-forward NN
 function create_simple_evaluation(l::Vector{<:NNLayer})
-    [(i, [i - 1]) for i in 1:length(l)]
+    [(i, [i == 1 ? -1 : i - 1]) for i in 1:length(l)]
 end
 
 function simple_apply_grad(m::Models.Model, g)
@@ -118,11 +128,11 @@ end
 
 function produce_degenerate(layers::Vector, n_inputs::Int)
     evalOrder = create_simple_evaluation(layers)
-    n_params = count_params(layers, evalOrder, n_inputs)
+    n_params = count_params(layers, evalOrder, [n_inputs])
     DegenerateModel(
         simple_apply_grad,
         ModelStructure(layers, evalOrder, n_inputs, n_params),
-        init_means(layers, evalOrder, n_inputs)
+        init_means(layers, evalOrder, [n_inputs])
     )
 end
 
@@ -184,12 +194,11 @@ function log_density(m::Model, W::AbstractArray,
 end
 
 function get_layer_output(li::Int, layers::Vector{<:NNLayer}, outputs::AbstractVector, 
-        passState::AbstractVector, evaluationStatus::AbstractVector)
+        passState::AbstractArray, evaluationStatus::AbstractVector)
     return evaluationStatus[li] == 1 ? outputs[li] : get_layer_state(layers[li], passState[li])
 end
 
-function pred(s::ModelStructure, weights::AbstractArray, 
-        X::AbstractMatrix)
+function pred(s::ModelStructure, weights::AbstractArray, X::AbstractMatrix)
     initState = [repeat(init_state(l), 0, size(X,2)) for l in s.layers]
     pred(s, weights, X, initState)
 end
@@ -197,7 +206,7 @@ end
 function evaluateLayer(
         s::ModelStructure, 
         outputs::AbstractVector, 
-        passState::AbstractVector, 
+        passState::AbstractVector{<:AbstractArray{Float64}}, 
         evaluationStatus, 
         initState,
         i::Int64, 
@@ -232,7 +241,7 @@ function evaluateLayer(
 end
 
 function pred(s::ModelStructure, weights::AbstractArray,
-        X::AbstractMatrix, initState::AbstractVector{<:AbstractMatrix{Float64}})
+        X::AbstractMatrix, initState::AbstractVector{<:AbstractVector{Float64}})
     res = deep_foldl(
         ((
             w_index,
@@ -253,38 +262,12 @@ function pred(s::ModelStructure, weights::AbstractArray,
         eachindex(s.evaluation),
         (
             1, 
-            fill(zeros(0,0), length(s.layers))::Vector{<:AbstractMatrix{Float64}},
-            fill(zeros(0,0), length(s.layers))::Vector{<:AbstractMatrix{Float64}},
+            fill(zeros(0), length(s.layers))::Vector{<:AbstractArray{Float64}},
+            fill(zeros(0), length(s.layers))::Vector{<:AbstractArray{Float64}},
             zeros(length(s.layers))
         )
     )[[3, 2]]
     return res
-end
-
-function count_params(layers::Vector, evalOrder::EvalStrategy, input_n::Int)
-    foldl(
-        ((n, last_i), (li, inputIndexes)) -> (
-            n + n_weights(layers[li], [j == 0 ? input_n : layers[j].n for j in inputIndexes]), 
-            last_i + 1
-        ),
-        evalOrder,
-        init = (0, 0)
-    )[1]
-end
-
-function init_means(layers::Vector, evalOrder::EvalStrategy, input_n::Int)
-    means = Vector(undef, length(layers))
-
-    for i in eachindex(evalOrder)
-        outputs_n = evalOrder[i][2] .|> (x -> x== 0 ? input_n : output_dimension(layers[x]))
-        means[i] = initialise_parameters(layers[i], outputs_n)
-    end
-
-    foldl(
-        (acc, w) -> [acc;w],
-        means,
-        init = []
-    ) |> vec
 end
 
 end

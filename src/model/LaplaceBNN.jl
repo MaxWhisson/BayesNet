@@ -19,11 +19,14 @@ using ..Models
 using ..Training
 using ..HelperFunctions
 
+using ..ModelFunctions: count_params
+
 # constructor for Laplace models
 function BuildLaplaceModel(priorCreator::Function, log_likelihood::Function, 
     n_inputs::Int, layers::Vector)
 
-    n_params = Models.count_params(layers, n_inputs)
+    evalOrder = create_simple_evaluation(layers)
+    n_params = count_params(layers, evalOrder, [n_inputs])
 
     return Models.LaplaceModel( 
         Models.simple_apply_grad,

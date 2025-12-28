@@ -18,76 +18,83 @@ module ResidualLayer
 
     import Flux.glorot_uniform
 
+    using ..ModelTypes: Model, 
+        EvalStrategy,
+        ModelStructure
+
+    using ..ModelFunctions: init_means,
+            count_params
+
+    using ..HelperFunctions: deep_foldl
+
     # struct for specifying a residual neural network layer.
     struct Residual <: NNLayer
-        n1::Int
-        n2::Int
-        activation::Function
-    end
-
-    function extract_parameters(l::Residual, params::AbstractVector, pos::Int, 
-            last_outputs_n::Vector{Int})
-        extractedParams = Vector(undef, 2 * (length(last_outputs_n) + 1))
-        nextPos = 0
-
-        for i in eachindex(last_outputs_n)
-            nextPos = pos + last_outputs_n[i] * l.n1
-            extractedParams[2(i - 1) + 1] = reshape(
-                params[pos:nextPos - 1],
-                (l.n1, last_outputs_n[i])
-            )
-
-            pos = nextPos
-            nextPos += l.n1
-            extract_parameters[2i] = params[pos: nextPos - 1]
-            pos = nextPos
-        end
-
-        pos = nextPos
-        nextPos += l.n1 * l.n2
-        extract_parameters[end - 1] = reshape(params[pos:nextPos - 1], (l.n2, l.n1))
-
-        pos = nextPos
-        nextPos += l.n2
-        extract_parameters[end] = params[pos:nextPos - 1]
-    
-        return (nextPos, extractedParams)
+        inner::ModelStructure
     end
 
     function forward(l::Residual, layer_params::AbstractVector, 
-            inputs::AbstractArray, state::AbstractMatrix{Float64})
-        output = [
-            l.activation.(layer_params[2(i - 1) + 1] * input .+ layer_params[2i])
-            for i in eachindex(inputs)
-        ] |> sum
-        return (sum(inputs) + (layer_params[end - 1] * output .+ layer_params[end]), [])
+            inputs::AbstractArray, initState::AbstractMatrix{Float64})
+        (res, state) = pred(l.inner, layer_params, sum(inputs), initState)
+        return (sum(inputs) + res, state)
     end
 
+    function __extract_params(l::NNLayer, params::AbstractVector, pos::Int, 
+            extracted_i::Int, in_ns::Vector{Int}, current_extraction::AbstractVector)
+        (res, newPos) = extract_parameters(l, params, pos, in_ns)
+        return (
+            newPos,
+            [current_extraction[1:extracted_i];res;current_extraction[extracted_i + length(res) + 1:end]],
+            extracted_i + length(res) + 1
+        )
+    end
+
+    function extract_parameters(l::Residual, params::AbstractVector, param_pos::Int, 
+            in_ns::Vector{Int})
+        n_total_params = get_n_params(l, in_ns)
+        deep_foldl(
+            ((param_i, extracted_i, current_params), (layer_i, layer_ins_i)) -> 
+                __extract_parameters(
+                    l.inner.layers[layer_i], 
+                    params, 
+                    param_i,
+                    extracted_i, 
+                    [j < 0 ? in_ns[abs(j)] : output_dimension(l.inner.layers[j]) for j in layer_ins_i],
+                    current_params
+                ),
+            l.inner.evaluation,
+            (param_pos, 0, [zeros(0) for i in 1:n_total_params])
+        )[1,2]
+    end
+
+    # ns_in must be single element
     function initialise_parameters(l::Residual, ns_in::Vector{Int})
-        return [([
-            [reshape(glorot_uniform(n_in, l.n1), (n_in * l.n1, 1));
-            zeros(l.n1)]
-            for n_in in ns_in
-        ] |> (x -> reduce(vcat, x)));
-            reshape(glorot_uniform(l.n1, l.n2), (l.n1 * l.n2, 1));
-            zeros(l.n2)
-        ]
+        init_means(l.inner.layers, l.inner.evaluation, ns_in)
     end
 
     function output_dimension(l::Residual)
-        return l.n2
+        return output_dimension(l.inner.layers[end])
     end
 
     function n_weights(l::Residual, ns_in::Vector{Int})
-        return l.n2 + (l.n1 * l.n2) + [l.n1 + (n_in * l.n1) for n_in in ns_in] |> sum
+        count_params(l.inner.layers, l.inner.evaluation, ns_in)
     end
 
-    function init_state(l::Residual)
-        return []
+    function init_state(s::Substructure)::Vector{Float64}
+        reduce(vcat, s.inner.layers .|> (l -> init_state(l)))
     end
 
-    # state will be [] here
     function get_layer_state(l::Residual, state::AbstractVector)
-        return zeros(l.n2)
+        return get_layer_state(l.inner, state)
+    end
+
+    function get_n_params(l::LSTM, in_ns::Vector{Int})
+        deep_foldl(
+            (count, (layer_i, layer_ins_i)) -> count + get_n_params(
+                l.inner.layers[layer_i], 
+                [i < 0 ? in_ns[abs(i)] : output_dimension(l.layers[i]) for i in layer_ins_i]
+            ),
+            l.inner.evaluation,
+            0
+        )
     end
 end

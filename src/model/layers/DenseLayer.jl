@@ -6,7 +6,8 @@ module DenseLayer
             n_weights,
             extract_parameters,
             init_state,
-            get_layer_state
+            get_layer_state,
+            get_n_params
 
     import ..Layer:NNLayer, 
         forward, 
@@ -14,7 +15,8 @@ module DenseLayer
         output_dimension, n_weights, 
         extract_parameters,
         init_state,
-        get_layer_state
+        get_layer_state,
+        get_n_params
     
     import Flux.glorot_uniform
     
@@ -50,25 +52,25 @@ module DenseLayer
     end
 
     function extract_parameters(l::Dense, params::AbstractVector{Float64}, 
-            pos::Int, out_n::Vector{Int})
+            pos::Int, in_ns::Vector{Int})
         deep_foldl(
             ((curPos, extractedParams), i) ->
             (
-                pos + (out_n[i] + 1) * l.n,
+                pos + (in_ns[i] + 1) * l.n,
                 [
                     extractedParams[1:2(i - 1)];
                     [reshape(
-                        params[pos:pos + out_n[i] * l.n - 1],
-                        (l.n, out_n[i])
+                        params[pos:pos + in_ns[i] * l.n - 1],
+                        (l.n, in_ns[i])
                     )];
                     [params[
-                        pos + out_n[i] * l.n:pos + (out_n[i] + 1) * l.n - 1
+                        pos + in_ns[i] * l.n:pos + (out_n[i] + 1) * l.n - 1
                     ]];
                     extractedParams[2i + 1:end]
                 ]
             ),
-            eachindex(out_n),
-            (pos, fill(zeros(0,0), 2 * length(out_n)))
+            eachindex(in_ns),
+            (pos, fill(zeros(0,0), 2 * length(in_ns)))
         )
     end
 
@@ -76,8 +78,11 @@ module DenseLayer
         return []
     end
 
-    # state will be [] here
-    function get_layer_state(l::Dense, _::AbstractMatrix)
+    function get_layer_state(l::Dense, _::AbstractArray)
         return zeros(l.n)
+    end
+
+    function get_n_params(_::Dense, in_ns::Vector{Int})
+        return 2 * length(in_ns)
     end
 end
